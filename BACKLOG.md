@@ -2909,6 +2909,23 @@ in the library, so the app already has somewhere better to send them.
   "Extract as…"; if user confusion ever shows up, that is the
   alternative.
 
+- **PART DONE 2026-09-12** — the gesture half. `gestures.py`
+  (`add_context_menu`) attaches a `Gtk.GestureLongPress` beside the
+  secondary-click gesture, and all three context-menu sites now go
+  through it: the card's "Cite this paper as…", the PDB chip's "Open
+  in Coot" (which keeps its capture phase and sequence claim to
+  pre-empt `Gtk.Label`'s own link menu), and the author avatar's
+  "Copy link". `set_touch_only(False)` is the load-bearing call — the
+  default would have served the touchscreen and left the trackpad
+  exactly where it was. The long press claims its sequence, which
+  both releases the implicit grab before the popover is mapped and
+  stops the hold also activating what is underneath, so holding a
+  card opens the menu rather than the PDF.
+
+  **Still open: the visible affordance.** Press-and-hold is
+  discoverable by habit, not by looking, so the tooltip / three-dot
+  question below stands.
+
 - **The "Cite this paper as…" menu is undiscoverable.** It is bound to
   right-click on the card's outer box (`browse.py:1359-1365`,
   `set_button(3)`), and nothing on the card advertises it — no

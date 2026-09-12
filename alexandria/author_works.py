@@ -18,15 +18,15 @@ from gi.repository import Gtk, GLib, Gdk, Gio, Pango, Adw, GObject
 import datetime
 
 from . import (metrics, index, importer, opener, author_image,
-               viewer, pdf_fetch, status_ticker, funding, gtr)
+               viewer, pdf_fetch, status_ticker, funding, gtr, gestures)
 from .identity import user_agent
 from .markup import safe_pango_markup
 
 
 def _attach_copy_link_menu(button, url):
-    """Attach a right-click context menu with a 'Copy link' entry.
-    The button keeps its primary (left-click) action; right-click
-    pops up a small menu over the button."""
+    """Attach a context menu with a 'Copy link' entry.
+    The button keeps its primary (left-click) action; a right-click or
+    a press-and-hold pops up a small menu over the button."""
     if not url:
         return
     action = Gio.SimpleAction.new("copy_url", None)
@@ -48,10 +48,7 @@ def _attach_copy_link_menu(button, url):
     popover = Gtk.PopoverMenu.new_from_model(menu)
     popover.set_parent(button)
 
-    gesture = Gtk.GestureClick.new()
-    gesture.set_button(Gdk.BUTTON_SECONDARY)
-
-    def on_press(_g, _n, x, y):
+    def on_menu(_g, x, y):
         rect = Gdk.Rectangle()
         rect.x = int(x)
         rect.y = int(y)
@@ -60,8 +57,7 @@ def _attach_copy_link_menu(button, url):
         popover.set_pointing_to(rect)
         popover.popup()
 
-    gesture.connect("pressed", on_press)
-    button.add_controller(gesture)
+    gestures.add_context_menu(button, on_menu)
 
 from . import prefs as _prefs
 

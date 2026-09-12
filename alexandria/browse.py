@@ -44,7 +44,7 @@ def _try_load_vte():
 
 from . import (index, edit_dialog, importer, metrics, sidecar, extract,
                identity, author_image, pdf_fetch, status_ticker,
-               funding, gtr,
+               funding, gtr, gestures,
                shortcuts as shortcuts_help,
                viewer, marks_config, prefs, watcher as watcher_mod,
                author_works, bibtex_import, bibtex_export, ris_export,
@@ -1438,14 +1438,12 @@ def make_card(row, parent_window, conn, on_saved, mark_labels=None,
         lambda *_: parent_window._mark_focus(row["pdf_path"]))
     box.add_controller(focus_click)
 
-    # Right-click → "Cite this paper as…" submenu. One button per
-    # vendored CSL style; click → format → clipboard → toast.
-    cite_click = Gtk.GestureClick.new()
-    cite_click.set_button(3)   # secondary mouse / two-finger trackpad
-    cite_click.connect(
-        "pressed",
-        lambda g, n, x, y: _show_cite_menu(g, x, y, row, parent_window))
-    box.add_controller(cite_click)
+    # Right-click (or press-and-hold) → "Cite this paper as…" submenu.
+    # One button per vendored CSL style; click → format → clipboard →
+    # toast.
+    gestures.add_context_menu(
+        box,
+        lambda g, x, y: _show_cite_menu(g, x, y, row, parent_window))
 
     return box
 
@@ -1586,27 +1584,14 @@ def _make_pdb_chip(pdb_id, parent_window):
     drag.set_actions(Gdk.DragAction.COPY)
     drag.connect("prepare", _prepare)
     lbl.add_controller(drag)
-    rc = Gtk.GestureClick.new()
-    rc.set_button(3)  # secondary mouse / two-finger trackpad
-    # CAPTURE phase: intercept the right-click before Gtk.Label's
-    # own link-context-menu handler (the "Copy Link Address / Open
-    # Link" popup) runs on the bubble phase.
-    rc.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
-
-    def _on_rc_pressed(g, n, x, y):
-        # Claim the sequence so GTK stops further propagation, both
-        # to release the gesture's implicit grab (otherwise the
-        # popover popup() races the grab and produces "Tried to map
-        # a grabbing popup with a non-top most parent") and to
-        # prevent the label's default link menu from also firing.
-        try:
-            g.set_state(Gtk.EventSequenceState.CLAIMED)
-        except Exception:
-            pass
-        _show_pdb_menu(g, x, y, code, parent_window)
-
-    rc.connect("pressed", _on_rc_pressed)
-    lbl.add_controller(rc)
+    # `capture=True` intercepts the press before Gtk.Label's own
+    # link-context-menu handler (the "Copy Link Address / Open Link"
+    # popup) runs on the bubble phase, and `claim_click=True` stops it
+    # firing as well — see `gestures.add_context_menu`.
+    gestures.add_context_menu(
+        lbl,
+        lambda g, x, y: _show_pdb_menu(g, x, y, code, parent_window),
+        capture=True, claim_click=True)
     return lbl
 
 
