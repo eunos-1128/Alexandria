@@ -854,6 +854,46 @@ Pending features, roughly grouped. Newest at the top of each section.
 
 - Page thumbnails sidebar.
 
+- **Review sioyek and Hammer PDF.** Asked for 2026-09-10. Two
+  existing readers aimed at exactly our reader — someone working
+  through scientific papers — and both have shipped features we are
+  currently designing from scratch.
+
+  **sioyek** (GPL-3.0, Qt + MuPDF, `github.com/ahrm/sioyek`) is the
+  closer relative and the more useful to read:
+    - **Smart jump** — click a reference or a figure mention and it
+      goes there "even if the PDF file doesn't provide links". That
+      is the entry directly below this one, already solved by
+      someone, and worth reading before writing our version.
+    - **Portals** — a link from one place in a document to another,
+      with the destination shown in a second window. The answer to
+      "I want the figure visible while I read the paragraph that
+      discusses it", which our jump-and-come-back does not give.
+    - **Overview** — right-click a reference for a popup of the
+      figure or bibliography entry without leaving the page. We
+      show a popover with the *metadata* of a reference; sioyek
+      shows the thing itself.
+    - Keyboard-first, vim-ish, with a command palette. A different
+      taste from ours, and not to be copied wholesale.
+
+  **Hammer PDF** (DataHammer group, Beijing Institute of
+  Technology; CIKM 2022 paper, arXiv 2204.02809) is further from
+  us but overlaps on ambition: entity extraction from the text with
+  in-place lookups, citation and reference expansion, a bundled
+  academic search. Multi-platform desktop app. Read the paper
+  rather than the app — the interesting part is which extractions
+  they judged worth surfacing.
+
+  **What to look for, specifically.** Not a feature list: how they
+  locate a jump target when the PDF has no link annotations. That is
+  the hard half of our figure-navigation entry, and sioyek has an
+  answer that works on arbitrary files with no JATS. If its approach
+  is sound, it is a better foundation than ours for the no-JATS
+  case.
+
+  Watch the licence: sioyek is GPL-3.0 and Alexandria is not, so
+  this is reading for approach, not for code.
+
 - **Click a figure or table reference the way you click a citation.**
   Asked for 2026-09-10. `[12]` already resolves and jumps; "Figure 3"
   and "Table 1" sit in the same sentence and do nothing.
