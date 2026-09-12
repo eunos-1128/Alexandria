@@ -790,6 +790,64 @@ def author_funding_fresh(cached, ttl_days=AUTHOR_FUNDING_TTL_DAYS):
         days=ttl_days)
 
 
+CREATE_GTR_PROJECTS = """
+CREATE TABLE IF NOT EXISTS authors.gtr_projects (
+    reference    TEXT PRIMARY KEY,
+    payload_json TEXT,
+    computed_at  TEXT NOT NULL
+);
+"""
+
+
+# A closed grant never changes and an open one changes slowly, so
+# this is really a permanent cache with a safety valve.
+GTR_PROJECT_TTL_DAYS = 90
+
+
+def get_gtr_project(conn, reference):
+    """Cached GtR project for a grant reference.
+
+    Returns `{payload, computed_at}` where `payload` may be None —
+    "GtR does not have this reference" is worth remembering, since
+    most award numbers in a library are not UKRI ones."""
+    if not reference:
+        return None
+    row = conn.execute(
+        "SELECT payload_json, computed_at FROM authors.gtr_projects"
+        " WHERE reference = ?", (reference,)).fetchone()
+    if row is None:
+        return None
+    payload = None
+    if row["payload_json"]:
+        try:
+            payload = json.loads(row["payload_json"])
+        except Exception:
+            payload = None
+    return {"payload": payload, "computed_at": row["computed_at"]}
+
+
+def set_gtr_project(conn, reference, payload):
+    if not reference:
+        return
+    conn.execute(
+        "INSERT OR REPLACE INTO authors.gtr_projects"
+        " (reference, payload_json, computed_at) VALUES (?, ?, ?)",
+        (reference, json.dumps(payload) if payload else None,
+         datetime.datetime.now().isoformat(timespec="seconds")))
+    conn.commit()
+
+
+def gtr_project_fresh(cached, ttl_days=GTR_PROJECT_TTL_DAYS):
+    if not cached:
+        return False
+    try:
+        when = datetime.datetime.fromisoformat(cached["computed_at"])
+    except Exception:
+        return False
+    return (datetime.datetime.now() - when) <= datetime.timedelta(
+        days=ttl_days)
+
+
 CREATE_AUTHOR_WORKS_CACHE = """
 CREATE TABLE IF NOT EXISTS authors.author_works_cache (
     openalex_id  TEXT NOT NULL,
@@ -1133,6 +1191,7 @@ def attach_authors_db(conn, path=None):
     conn.executescript(CREATE_AUTHOR_WORKS_CACHE)
     conn.executescript(CREATE_AUTHOR_RELATIONS)
     conn.executescript(CREATE_AUTHOR_FUNDING)
+    conn.executescript(CREATE_GTR_PROJECTS)
     conn.executescript(CREATE_AUTHOR_TRAIL)
     _merge_author_tables_into_shared(conn)
     # Two catalogues can hold the same person under two key kinds,

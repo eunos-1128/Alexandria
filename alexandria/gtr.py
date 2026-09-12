@@ -25,6 +25,7 @@ Wikidata.
 """
 
 import json
+import re
 import urllib.parse
 import urllib.request
 
@@ -80,6 +81,93 @@ def surname_search_url(surname, size=20):
     unrelated people because the word appears in every abstract.
     Scoping to `per.sn` turns that into one hit."""
     return _persons_url(surname, field="per.sn", size=size)
+
+
+def reference_search_url(reference):
+    """Look a project up by its grant reference (`BB/L007010/1`).
+
+    `pro.gr` is the grant-reference field. Unscoped `q=` happens to
+    work for a reference too — it is distinctive enough not to
+    collide — but scoping means a reference that looks like an
+    English word cannot start matching abstracts."""
+    return API + "projects?" + urllib.parse.urlencode(
+        {"q": reference, "f": "pro.gr", "fetchSize": 5})
+
+
+def normalise_reference(ref):
+    """A grant reference as deposited, reduced for comparison.
+
+    Publishers deposit `BB/L007010/1`, `bb/l007010/1` and
+    `BB/L007010/1 ` for the same award."""
+    if not ref:
+        return ""
+    return " ".join(str(ref).split()).upper()
+
+
+def looks_like_ukri_reference(ref):
+    """Whether a reference is worth asking GtR about at all.
+
+    UKRI references are two letters, a slash, then the award — NIH
+    and ERC numbers look nothing like it, and asking GtR about them
+    is a request that can only fail."""
+    r = normalise_reference(ref)
+    return bool(re.match(r"^[A-Z]{2}/[A-Z0-9]+/?[A-Z0-9]*$", r))
+
+
+def project_by_reference(reference, http_get_json=None):
+    """The GtR project for a grant reference, or None.
+
+    Returns the same shape `parse_project` gives, plus `pi_name`:
+    the point of the lookup is to say *whose* grant a paper's award
+    number belongs to, which is the fact CrossRef does not record and
+    routinely gets wrong."""
+    ref = normalise_reference(reference)
+    if not ref:
+        return None
+    get = http_get_json or _http_get_json
+    try:
+        data = get(reference_search_url(ref))
+    except Exception:
+        return None
+    projects = (data or {}).get("project") or []
+    match = None
+    for pr in projects:
+        for i in ((pr or {}).get("identifiers") or {}).get("identifier", []):
+            if normalise_reference((i or {}).get("value")) == ref:
+                match = pr
+                break
+        if match:
+            break
+    if match is None:
+        return None
+    fund = None
+    furl = fund_url(match)
+    if furl:
+        try:
+            fund = get(furl)
+        except Exception:
+            fund = None
+    out = parse_project(match, fund)
+    out["pi_name"] = _pi_name(match, get)
+    return out
+
+
+def _pi_name(project, get):
+    """The PI's name, one extra request. None when the project lists
+    no PI or the fetch fails."""
+    for l in _links(project, ROLE_PI):
+        href = _https(l.get("href"))
+        if not href:
+            continue
+        try:
+            person = get(href)
+        except Exception:
+            return None
+        name = " ".join(
+            x for x in ((person or {}).get("firstName"),
+                        (person or {}).get("surname")) if x)
+        return name or None
+    return None
 
 
 def _links(record, rel=None):

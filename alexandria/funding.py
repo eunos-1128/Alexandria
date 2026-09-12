@@ -195,3 +195,97 @@ def papers_from_index(conn):
                 d[dest] = []
         rows.append(d)
     return rows
+
+
+# --- checking a deposit against the awarding body ---------------------
+
+_FUNDER_ALIASES = {
+    "bbsrc": ("biotechnology and biological sciences research council",),
+    "mrc": ("medical research council",),
+    "epsrc": ("engineering and physical sciences research council",),
+    "nerc": ("natural environment research council",),
+    "stfc": ("science and technology facilities council",),
+    "ahrc": ("arts and humanities research council",),
+    "esrc": ("economic and social research council",),
+    "innovate uk": ("innovate uk", "technology strategy board"),
+    "gcrf": ("global challenges research fund",),
+    "ukri": ("uk research and innovation",),
+    "nihr": ("national institute for health research",
+             "national institute for health and care research"),
+}
+
+# A UKRI award administered under a cross-council fund is deposited
+# under whichever name the author had to hand: an `ST/` reference is
+# a Science and Technology Facilities Council number even when GtR
+# reports the lead funder as GCRF, because GCRF money was spent
+# through the councils. Neither name is wrong, so neither is a
+# mis-deposit.
+_REFERENCE_PREFIX_FUNDERS = {
+    "BB": "bbsrc", "MR": "mrc", "EP": "epsrc", "NE": "nerc",
+    "ST": "stfc", "AH": "ahrc", "ES": "esrc",
+}
+
+
+def funder_matches(deposited, authoritative):
+    """Whether a deposited funder name means the same body as GtR's.
+
+    GtR answers in acronyms ("BBSRC"); CrossRef deposits carry the
+    long form, and the two have to be reconciled before any claim
+    about a mismatch is made — otherwise every correct record looks
+    wrong."""
+    a = _key(deposited)
+    b = _key(authoritative)
+    if not a or not b:
+        return False
+    if a == b or a in b or b in a:
+        return True
+    for short, longs in _FUNDER_ALIASES.items():
+        names = (short,) + longs
+        if any(_key(n) == a or _key(n) in a for n in names) and \
+           any(_key(n) == b or _key(n) in b for n in names):
+            return True
+    return False
+
+
+def check_grants(paper, lookup):
+    """Check a paper's deposited grants against the awarding body.
+
+    `lookup(reference)` returns a GtR project dict or None. Yields a
+    verdict per award:
+
+      "confirmed"    GtR has the award and agrees on the funder
+      "wrong-funder" GtR has it and the deposit names someone else
+      "not-ukri"     the reference is not UKRI-shaped, so unknowable
+      "unknown"      UKRI-shaped but GtR has no such award
+
+    Only "wrong-funder" is evidence of the mis-zipping seen in
+    CrossRef deposits; the rest are silence, not innocence."""
+    out = []
+    from . import gtr
+    for grant in paper.get("grants") or []:
+        if not isinstance(grant, dict):
+            continue
+        ref = gtr.normalise_reference(grant.get("award_id"))
+        deposited = grant.get("funder")
+        if not ref:
+            continue
+        if not gtr.looks_like_ukri_reference(ref):
+            out.append({"reference": ref, "deposited": deposited,
+                        "verdict": "not-ukri", "project": None})
+            continue
+        project = lookup(ref)
+        if not project:
+            out.append({"reference": ref, "deposited": deposited,
+                        "verdict": "unknown", "project": None})
+            continue
+        ok = funder_matches(deposited, project.get("funder"))
+        if not ok:
+            # The council that issued the reference is as valid an
+            # answer as the cross-council fund GtR names.
+            council = _REFERENCE_PREFIX_FUNDERS.get(ref[:2])
+            if council and funder_matches(deposited, council):
+                ok = True
+        out.append({"reference": ref, "deposited": deposited,
+                    "verdict": "confirmed" if ok else "wrong-funder",
+                    "project": project})
+    return out

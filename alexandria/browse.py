@@ -44,6 +44,7 @@ def _try_load_vte():
 
 from . import (index, edit_dialog, importer, metrics, sidecar, extract,
                identity, author_image, pdf_fetch, status_ticker,
+               funding, gtr,
                viewer, marks_config, prefs, watcher as watcher_mod,
                author_works, bibtex_import, bibtex_export, ris_export,
                csl_export, opener, references_pdf, discover, csl_format,
@@ -259,6 +260,80 @@ def make_crossmark_chip(label, severity, year=None, target_doi=None):
     if target_doi:
         tt = "{} — see {}".format(tt, target_doi)
     lbl.set_tooltip_text(tt)
+    frame.set_child(lbl)
+    return frame
+
+
+# Grant references already resolved this session. The filler writes
+# them to the database; this saves a query per card per reload.
+_GTR_CHIP_MEMO = {}
+
+
+def confirmed_ukri_grant(record, conn):
+    """The GtR-confirmed UKRI grant for a paper, or None.
+
+    Reads only what the background filler has already resolved — a
+    card must never wait on a network. Returns the first confirmed
+    award, since a paper naming two UKRI grants still only needs to
+    say "this is UKRI-funded, here is one of them"; the rest are in
+    the tooltip."""
+    if conn is None:
+        return None
+    for grant in (record or {}).get("grants") or []:
+        if not isinstance(grant, dict):
+            continue
+        ref = gtr.normalise_reference(grant.get("award_id"))
+        if not ref or not gtr.looks_like_ukri_reference(ref):
+            continue
+        if ref in _GTR_CHIP_MEMO:
+            project = _GTR_CHIP_MEMO[ref]
+        else:
+            try:
+                cached = index.get_gtr_project(conn, ref)
+            except Exception:
+                cached = None
+            project = (cached or {}).get("payload")
+            _GTR_CHIP_MEMO[ref] = project
+        if project:
+            return project
+    return None
+
+
+def make_funding_chip(project):
+    """A chip naming the grant that paid for the paper.
+
+    Only ever built from a GtR record, never from the deposit: the
+    award number in a sidecar is the publisher's, and on papers with
+    several funders those get mis-paired. This says what the
+    awarding body says."""
+    if not project:
+        return None
+    ref = project.get("reference") or ""
+    funder = project.get("funder") or "UKRI"
+    frame = Gtk.Frame()
+    frame.set_valign(Gtk.Align.CENTER)
+    lbl = Gtk.Label()
+    lbl.set_markup(
+        '<span foreground="#6a5acd" weight="bold"><small>{}</small></span>'
+        .format(GLib.markup_escape_text(
+            "{} {}".format(funder, ref).strip())))
+    lbl.set_margin_start(5)
+    lbl.set_margin_end(5)
+    lbl.set_margin_top(1)
+    lbl.set_margin_bottom(1)
+    tip = [project.get("title") or "UKRI grant"]
+    if project.get("pi_name"):
+        tip.append("PI: " + project["pi_name"])
+    money = []
+    if project.get("amount_gbp"):
+        money.append("£{:,}".format(project["amount_gbp"]))
+    if project.get("start") and project.get("end"):
+        money.append("{}–{}".format(project["start"], project["end"]))
+    if money:
+        tip.append(" · ".join(money))
+    tip.append("This paper names this award; the grant's details "
+               "come from UKRI Gateway to Research.")
+    lbl.set_tooltip_text("\n".join(tip))
     frame.set_child(lbl)
     return frame
 
@@ -1134,6 +1209,13 @@ def make_card(row, parent_window, conn, on_saved, mark_labels=None,
         si_badge.set_valign(Gtk.Align.START)
         title_row.append(si_badge)
 
+    grant_project = confirmed_ukri_grant(
+        card_record, getattr(parent_window, "conn", None))
+    grant_chip = make_funding_chip(grant_project)
+    if grant_chip is not None:
+        grant_chip.set_valign(Gtk.Align.START)
+        title_row.append(grant_chip)
+
     meta_chip = make_metadata_chip(
         card_record, parent_window,
         row["pdf_path"], row["sidecar_path"], on_saved)
@@ -1982,6 +2064,11 @@ class BrowserWindow(Adw.ApplicationWindow):
         # consistent with the other two refreshers above.
         self._feed_stop = threading.Event()
         threading.Thread(target=self._feed_refresher,
+                         daemon=True).start()
+
+        # Resolve UKRI grant references so cards can name the grant.
+        self._gtr_stop = threading.Event()
+        threading.Thread(target=self._gtr_reference_filler,
                          daemon=True).start()
 
         # One-shot CrossRef-extras backfill. CrossRef-only, so it
@@ -3609,6 +3696,64 @@ class BrowserWindow(Adw.ApplicationWindow):
                 pass
         return False
 
+    def _gtr_reference_filler(self, initial_delay_seconds=240.0,
+                              per_call_delay_seconds=0.4):
+        """Resolve the library's UKRI grant references against
+        Gateway to Research, so a card can name the grant that paid
+        for the paper without a lookup while it renders.
+
+        Only UKRI-shaped references are asked about: an NIH or ERC
+        number cannot be in GtR, and asking is a request that can
+        only fail. Misses are cached too, so the second pass over a
+        library asks about nothing it has already asked about.
+
+        Slow and once per session, behind the other refreshers —
+        this is the least urgent thing in the app, and GtR is a
+        small public service.
+
+        Owns its own connection, like the other refreshers."""
+        if self._gtr_stop.wait(initial_delay_seconds):
+            return
+        conn = None
+        try:
+            conn = index.connect_existing(self._db_path)
+            refs = set()
+            for paper in funding.papers_from_index(conn):
+                for grant in paper.get("grants") or []:
+                    if not isinstance(grant, dict):
+                        continue
+                    ref = gtr.normalise_reference(grant.get("award_id"))
+                    if ref and gtr.looks_like_ukri_reference(ref):
+                        refs.add(ref)
+            n = 0
+            for ref in sorted(refs):
+                if self._gtr_stop.is_set():
+                    return
+                cached = index.get_gtr_project(conn, ref)
+                if cached and index.gtr_project_fresh(cached):
+                    continue
+                try:
+                    project = gtr.project_by_reference(ref)
+                except Exception:
+                    project = None
+                try:
+                    index.set_gtr_project(conn, ref, project)
+                except Exception:
+                    pass
+                n += project is not None
+                if self._gtr_stop.wait(per_call_delay_seconds):
+                    return
+            if n:
+                print("[gtr] resolved {} UKRI grant reference(s)".format(n))
+        except Exception as e:
+            _wlog("gtr", "reference fill failed: {}".format(e))
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+
     def _author_score_refresher(self, initial_delay_seconds=180.0,
                                 pause_seconds=60.0,
                                 per_call_delay_seconds=0.2):
@@ -4555,6 +4700,10 @@ class BrowserWindow(Adw.ApplicationWindow):
             pass
         try:
             self._lic_stop.set()
+        except Exception:
+            pass
+        try:
+            self._gtr_stop.set()
         except Exception:
             pass
         try:
