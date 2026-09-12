@@ -2440,6 +2440,46 @@ via `extract.CROSSREF_USER_AGENT`.
   data.
 
 ## OpenAlex client
+- **PART DONE 2026-09-12** (`9fbfaf7`), and the premise is measured at
+  last. **Unauthenticated OpenAlex still returns 200 today** — works
+  by DOI, title search, author search, `cites:` filters and
+  `group_by`, all checked directly. So the February-2026 key
+  requirement is not in force for anything we call, and the silence
+  this entry describes was latent rather than live. Which is the
+  argument for having fixed it unprompted: the day the switch flips,
+  nothing would have said so.
+
+  Done: **401/403 raises `OpenAlexAuthRequired`** (beside
+  `OpenAlexQuotaExhausted`, both under a new `OpenAlexUnavailable`
+  base), is not retried, and trips the existing breaker — so the
+  citation refresher stops after one rejection instead of one per
+  paper. `set_openalex_api_key` releases the breaker, so pasting a key
+  works without a restart. `openalex_blocked_reason()` gives the UI one
+  place to ask and the right remedy; the author view previously said
+  "daily quota exhausted, resumes at 00:00 UTC" for every blocked
+  state, which is useless advice for a missing key. One toast names
+  Preferences, raised from the refresher because that is the
+  library-wide walk.
+
+  Plus the diagnostics the entry's last line asked for: one line on
+  the first unauthenticated request naming the pool we are in, and one
+  line per distinct dead-end status (404 stays quiet — plenty of DOIs
+  are genuinely unknown).
+
+  **Measured, with a real no-config first run** (2026-09-12, four
+  papers, empty XDG dirs, no key, no `contact_email`): full enrichment.
+  DOI, title, authors with ORCIDs, year, journal, volume/issue/pages,
+  abstract, citation counts with per-year history, funders and grants,
+  OA status, JATS stored for two of the four. The unauthenticated
+  experience is currently *good*, not degraded.
+
+  **Still open: degrade-to-what-works is untested**, because nothing
+  has degraded yet. The first real 401 is the only thing that will
+  prove the Crossref/stored-JATS/cache fallbacks actually carry an
+  unkeyed session.
+
+  Original entry:
+
 - **Behave gracefully when there is no OpenAlex key.** OpenAlex is
   reported to require a registered API key from February 2026 (seen in
   search results, worth confirming against their docs). A key is
@@ -2883,6 +2923,38 @@ in the library, so the app already has somewhere better to send them.
   folder).
 
 ## UI
+
+- **First run writes no config file, so the two settings that matter
+  are invisible.** Measured 2026-09-12 by running with empty XDG
+  directories: Alexandria starts, watches the library, imports, fetches
+  JATS and enriches — and never creates
+  `$XDG_CONFIG_HOME/Alexandria/config.json` at all. `prefs` defaults
+  everything in memory and only writes on the first explicit change.
+
+  Nothing is broken by that. The problem is discovery: a new user has
+  no file to look inside, and the two things they would want to set —
+  `contact_email` and the OpenAlex API key — are invisible until
+  something quietly gets worse. Without the email, Unpaywall is
+  skipped entirely (`pdf_fetch.unavailable_sources()` returns
+  `['Unpaywall']`), which is announced only when they press **Get
+  PDF**. Without the key they are on the common quota, which shows up
+  as 429s during a bulk import and nothing at all before that.
+
+  Options, cheapest first:
+
+    - **Write the file on first run**, with the known keys present and
+      empty. It makes the settings greppable and documents itself,
+      which a JSON file otherwise cannot (no comments).
+    - **Say it once at startup** — the `[metrics]` lines added in
+      `9fbfaf7` already do this in the terminal, but a GUI user never
+      sees a terminal. A dismissible banner on the first run with a
+      **Preferences** button would.
+    - **A first-run dialog** asking for the email and key. The most
+      effective and the most intrusive; the app works without either,
+      so demanding them before the first card appears would overstate
+      how badly they are needed.
+
+  Worth deciding before the README gets more users than it has now.
 
 - **DONE 2026-09-12** (`50b747b`). The card's context menu grew an
   **"Extract as…"** section above the citation styles, with BibTeX and
