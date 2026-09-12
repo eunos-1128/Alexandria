@@ -42,9 +42,20 @@ writes, by default, to `$HOME/Documents/Alexandria` and the database to
 in `$HOME/.config/Alexandria/config.json` for sort order config and
 OpenAlex key.
 
+## Background
+
+For a long time I had liked referencer
+
+[https://icculus.org/referencer](https://icculus.org/referencer)
+
+as a local-storage pdf organizer/reference manager. But that seems to no
+longer be maintained or updated. Which is why I thought.. maybe I can
+make one...
+
 ## > [!CAUTION]
+
 > If you cloned Alexandria before 0.5.0 then it's probably best
-to throw away the previous repo and start fresh.
+> to throw away the previous repo and start fresh.
 >
 > I rewrote the history and removed and recreated the repo to remove
 > information that should not have been there.
