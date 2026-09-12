@@ -45,6 +45,7 @@ def _try_load_vte():
 from . import (index, edit_dialog, importer, metrics, sidecar, extract,
                identity, author_image, pdf_fetch, status_ticker,
                funding, gtr,
+               shortcuts as shortcuts_help,
                viewer, marks_config, prefs, watcher as watcher_mod,
                author_works, bibtex_import, bibtex_export, ris_export,
                csl_export, opener, references_pdf, discover, csl_format,
@@ -1918,6 +1919,7 @@ class BrowserWindow(Adw.ApplicationWindow):
         tools_section.append("Fetch JATS full text…", "win.jats-backfill")
         hamburger_menu.append_section(None, tools_section)
         hamburger_menu.append("Preferences…", "win.preferences")
+        hamburger_menu.append("Keyboard Shortcuts", "win.shortcuts")
         hamburger_menu.append("About Alexandria", "win.about")
         hamburger_btn = Gtk.MenuButton()
         hamburger_btn.set_icon_name("open-menu-symbolic")
@@ -2034,11 +2036,16 @@ class BrowserWindow(Adw.ApplicationWindow):
         drop.connect("drop", self._on_drop)
         self.add_controller(drop)
 
-        # Ctrl-F focuses the search entry.
+        # Ctrl-F focuses the search entry; Ctrl-? is the GNOME
+        # convention for "what are the keys?".
         shortcuts = Gtk.ShortcutController()
         shortcuts.add_shortcut(Gtk.Shortcut.new(
             trigger=Gtk.ShortcutTrigger.parse_string("<Control>f"),
             action=Gtk.CallbackAction.new(self._focus_search)))
+        shortcuts.add_shortcut(Gtk.Shortcut.new(
+            trigger=Gtk.ShortcutTrigger.parse_string("<Control>question"),
+            action=Gtk.CallbackAction.new(
+                lambda *_a: (self._open_shortcuts(None), True)[1])))
         self.add_controller(shortcuts)
 
         # Background citation-count refresh.
@@ -2445,6 +2452,13 @@ class BrowserWindow(Adw.ApplicationWindow):
             self.conn = None
         return False
 
+    def _open_shortcuts(self, _btn=None):
+        """The keyboard-shortcuts window (hamburger menu, or Ctrl-?)."""
+        try:
+            shortcuts_help.present(self)
+        except Exception as e:
+            print("shortcuts window failed:", e)
+
     def _open_about(self, _btn):
         """Adw.AboutDialog with the standard fields. Icon resolves
         via the icon-theme search path registered in `on_activate`
@@ -2732,6 +2746,7 @@ class BrowserWindow(Adw.ApplicationWindow):
             ("preferences",   self._open_preferences),
             ("toggle-terminal", self._on_toggle_terminal),
             ("jats-backfill", self._on_jats_backfill),
+            ("shortcuts",     self._open_shortcuts),
             ("about",         self._open_about),
             ("new-catalogue", self._on_new_catalogue),
             ("remove-catalogue", self._on_remove_catalogue),

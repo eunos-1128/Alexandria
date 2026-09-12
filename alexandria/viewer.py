@@ -894,6 +894,9 @@ class PdfViewerWindow(Gtk.Window):
             # its macOS counterpart and this is a macOS-first app.
             ("<Alt>Left",           lambda *_: self._jump_back()),
             ("<Meta>bracketleft",   lambda *_: self._jump_back()),
+            # Most of the app's shortcuts are this window's, so it
+            # needs the way to see them more than the library does.
+            ("<Control>question",   lambda *_: self._show_shortcuts()),
         ]:
             sc.add_shortcut(Gtk.Shortcut.new(
                 trigger=Gtk.ShortcutTrigger.parse_string(trigger),
@@ -1397,6 +1400,13 @@ class PdfViewerWindow(Gtk.Window):
 
     def _on_sidebar_toggled(self, btn):
         self.split.set_show_sidebar(btn.get_active())
+
+    def _show_shortcuts(self):
+        try:
+            from . import shortcuts as shortcuts_help
+            shortcuts_help.present(self)
+        except Exception as e:
+            print("shortcuts window failed:", e)
 
     def _toggle_sidebar(self):
         self.sidebar_toggle.set_active(
