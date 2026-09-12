@@ -700,6 +700,23 @@ class AuthorPage(Gtk.Box):
         self.load_bar.set_valign(Gtk.Align.CENTER)
         self.load_bar.set_visible(False)
         status_row.append(self.load_bar)
+
+        # One dot per request. The pulse says "something is
+        # happening"; these say *what*, and which part is still
+        # outstanding — with three calls in flight, a single
+        # indicator cannot show that two came back and one did not.
+        self.req_dots = {}
+        dots = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=3)
+        for key, label in (("profile", "profile"),
+                           ("works", "works"),
+                           ("coauths", "collaborators")):
+            dot = Gtk.Label()
+            dot.set_valign(Gtk.Align.CENTER)
+            self.req_dots[key] = (dot, label)
+            dots.append(dot)
+        self._dots_box = dots
+        dots.set_visible(False)
+        status_row.append(dots)
         self.append(status_row)
         self._load_pulse_id = None
 
@@ -716,6 +733,28 @@ class AuthorPage(Gtk.Box):
 
     # --- Fetch ---------------------------------------------------------
 
+    # Idle, in flight, answered, failed. The greens and oranges are
+    # the ones already used for chips elsewhere in the app.
+    _REQ_COLOURS = {
+        "idle":     ("#999999", "not started"),
+        "sent":     ("#cc8800", "waiting for a reply"),
+        "received": ("#338033", "reply received"),
+        "failed":   ("#cc3333", "failed"),
+    }
+
+    def set_request_state(self, key, state):
+        """Colour the dot for one of the three OpenAlex calls."""
+        entry = getattr(self, "req_dots", {}).get(key)
+        if entry is None:
+            return False
+        dot, label = entry
+        colour, meaning = self._REQ_COLOURS.get(
+            state, self._REQ_COLOURS["idle"])
+        dot.set_markup(
+            "<span foreground='{}'>●</span>".format(colour))
+        dot.set_tooltip_text("{}: {}".format(label, meaning))
+        return False
+
     def _start_load_pulse(self):
         """Show the activity bar. Idempotent: several fetches can be
         in flight (works, impact, citers) and the last to finish
@@ -723,6 +762,10 @@ class AuthorPage(Gtk.Box):
         if getattr(self, "load_bar", None) is None:
             return
         self.load_bar.set_visible(True)
+        if getattr(self, "_dots_box", None) is not None:
+            for key in self.req_dots:
+                self.set_request_state(key, "idle")
+            self._dots_box.set_visible(True)
         if self._load_pulse_id is None:
             # 120ms: fast enough to read as motion, slow enough that
             # it is not a strobe.
@@ -756,6 +799,8 @@ class AuthorPage(Gtk.Box):
             self._load_pulse_id = None
         if getattr(self, "load_bar", None) is not None:
             self.load_bar.set_visible(False)
+        if getattr(self, "_dots_box", None) is not None:
+            self._dots_box.set_visible(False)
         return False
 
     def _spawn_fetch(self):
@@ -793,11 +838,15 @@ class AuthorPage(Gtk.Box):
         out = {}
 
         def call(key, fn):
+            GLib.idle_add(self.set_request_state, key, "sent")
             try:
                 out[key] = fn()
             except Exception as e:
                 print("author fetch ({}): {}".format(key, e))
                 out[key] = None
+                GLib.idle_add(self.set_request_state, key, "failed")
+                return
+            GLib.idle_add(self.set_request_state, key, "received")
 
         threads = [
             threading.Thread(target=call, args=("profile", lambda:
