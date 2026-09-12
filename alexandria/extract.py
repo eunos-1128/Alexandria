@@ -160,13 +160,39 @@ def _doi_from_filename(pdf_path):
         return "10.1073/pnas.{}".format(m.group("id"))
     m = _BIORXIV_FILENAME_RE.match(name)
     if m:
-        return "10.1101/{}".format(m.group("id"))
+        return _biorxiv_doi_for_id(m.group("id"))
     m = _SCIADV_FILENAME_RE.match(name)
     if m:
         return "10.1126/sciadv.{}".format(m.group("id"))
     m = _DOI_AS_FILENAME_RE.match(name)
     if m:
         return "{}/{}".format(m.group("prefix"), m.group("rest"))
+    return None
+
+
+# bioRxiv changed DOI prefix from 10.1101 to 10.64898 in late 2025,
+# and the changeover was not clean: measured against Europe PMC, ids
+# posted 2025.11.20 to 2025.12.01 were issued under *both*. Before
+# 2025.11.20 it is always 10.1101; after 2025.12.01 always 10.64898;
+# inside the window the filename cannot tell you which.
+_BIORXIV_OLD_PREFIX_UNTIL = "2025.11.19"
+_BIORXIV_NEW_PREFIX_FROM = "2025.12.02"
+
+
+def _biorxiv_doi_for_id(ident):
+    """The DOI for a bioRxiv/medRxiv id like `2026.09.09.750088`, or
+    None when the prefix is genuinely ambiguous.
+
+    None rather than a guess: the id carries its own posting date, so
+    outside the changeover window this is exact — and inside it, a
+    confidently wrong DOI is worse than no DOI, because it stops
+    every later step from looking anywhere else. The text scan picks
+    those up instead."""
+    date = (ident or "")[:10]
+    if date <= _BIORXIV_OLD_PREFIX_UNTIL:
+        return "10.1101/" + ident
+    if date >= _BIORXIV_NEW_PREFIX_FROM:
+        return "10.64898/" + ident
     return None
 
 

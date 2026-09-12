@@ -374,6 +374,45 @@ def unavailable_sources():
     return missing
 
 
+# bioRxiv and medRxiv. 10.1101 is the long-standing prefix; 10.64898
+# is new, and papers posted under it are invisible to any rule that
+# only knows the old one.
+_PREPRINT_DOI_PREFIXES = ("10.1101/", "10.64898/")
+
+
+def looks_like_preprint_doi(doi):
+    return bool(doi) and str(doi).lower().startswith(_PREPRINT_DOI_PREFIXES)
+
+
+def _biorxiv_pdf_urls(doi, timeout=25):
+    """bioRxiv/medRxiv PDFs by construction: resolve the DOI, then
+    append `.full.pdf` to the landing page.
+
+    Worth doing because the metadata lies. Europe PMC reports
+    `hasPDF: "N"` and `isOpenAccess: "N"` for these papers and offers
+    no usable link — measured across ten 2026 bioRxiv preprints — and
+    yet every one of them downloads. Those flags describe what Europe
+    PMC *holds*, not what is reachable, and trusting them as a proxy
+    for "can we get this" discards the entire preprint corpus.
+
+    The DOI is resolved rather than the URL guessed, because the
+    version suffix (`v1`, `v2`, …) is part of the path and only the
+    redirect knows which is current."""
+    if not looks_like_preprint_doi(doi):
+        return []
+    try:
+        req = urllib.request.Request(
+            "https://doi.org/" + urllib.parse.quote(str(doi), safe="/"),
+            headers=_BROWSER_HEADERS)
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            landing = resp.geturl() or ""
+    except Exception:
+        return []
+    if not landing or "rxiv.org" not in landing:
+        return []
+    return [landing.rstrip("/") + ".full.pdf"]
+
+
 def oa_pdf_urls_for_doi(doi, also_try_europepmc=True,
                         on_progress=None):
     """Ordered list of candidate OA PDF URLs, de-duplicated.
@@ -413,6 +452,15 @@ def oa_pdf_urls_for_doi(doi, also_try_europepmc=True,
                 urls.append(u)
                 n += 1
         _report(on_progress, "EuropePMC: {}".format(_found(n)))
+
+    if looks_like_preprint_doi(doi):
+        _report(on_progress, "Asking bioRxiv…")
+        n = 0
+        for u in _biorxiv_pdf_urls(doi):
+            if u not in urls:
+                urls.append(u)
+                n += 1
+        _report(on_progress, "bioRxiv: {}".format(_found(n)))
     return urls
 
 
