@@ -439,6 +439,45 @@ Pending features, roughly grouped. Newest at the top of each section.
   the only one on the list that is real work.
 
 
+- **A scraped DOI can swallow the word that follows it.** Noticed
+  2026-09-08 while fixing the wrapped-DOI extraction (`7f225b9`).
+  In `1-s2.0-S1359644622002124-main.pdf` the DOI extracts as
+
+      10.1016/j.drudis.2022.05.021This
+
+  because the publisher's footer runs the licence sentence straight
+  on with no separating space:
+
+      https://doi.org/10.1016/j.drudis.2022.05.021This is an open
+      access article under the CC BY license (…)
+
+  `_DOI_RE`'s character class allows letters — it has to, since
+  plenty of DOIs contain them — so the match runs on into "This".
+
+  **Rare, and low-stakes here.** One paper in 181 across the library,
+  and only where the surrounding text abuts the DOI without
+  whitespace. The consequence is a DOI that resolves nowhere: no
+  citation counts, no enrichment, and a ghost-merge that would refuse
+  the correct PDF.
+
+  Options, none obviously right:
+    - **Split at a digit→Uppercase→lowercase boundary** (`021This`).
+      Cheap and it fixes this case; the risk is a DOI suffix that
+      legitimately looks like that.
+    - **Trust the file's own link annotation** where the DOI line has
+      one, which is what `tools/doi-print-check.py` does. Right in
+      principle and self-validating — but this particular PDF has no
+      DOI link annotation at all, so it would not help here.
+    - **Resolve and retry**: if the scraped DOI 404s at CrossRef,
+      trim trailing alphabetic runs and try again. Correct, but pays
+      a network round-trip on a case this rare.
+    - **Stop at known boilerplate** ("This is an open access
+      article", "Copyright", "©"). Works today, and is exactly the
+      kind of rule that rots.
+
+  Worth doing when something else takes us into `_scrape_doi`;
+  not worth a special trip.
+
 - **Resolve metadata from first author / journal / year when there is
   no DOI.** The natural companion to the pasted-citation work under
   Discovery — `find_doi_by_author_year` already does this and is
