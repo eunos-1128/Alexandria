@@ -18,7 +18,7 @@ from gi.repository import Gtk, GLib, Gdk, Gio, Pango, Adw, GObject
 import datetime
 
 from . import (metrics, index, importer, opener, author_image,
-               viewer, pdf_fetch, status_ticker, funding)
+               viewer, pdf_fetch, status_ticker, funding, gtr)
 from .identity import user_agent
 from .markup import safe_pango_markup
 
@@ -631,6 +631,19 @@ class AuthorPage(Gtk.Box):
             "Funders on the papers you have", self.funding_box, "funding")
         self.append(self.funding_label)
 
+        # UKRI grants held by this person (GtR, cached 30 days). The
+        # companion to the section above and the answer to the
+        # question it cannot ask: the one above is funders named on
+        # papers, this is awards the person was actually PI or Co-I
+        # on. Hidden unless GtR has them — most authors are not
+        # UK-funded and an empty "no grants" row would read as a
+        # statement about their funding rather than about coverage.
+        self.gtr_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
+                               spacing=4)
+        self.gtr_label = _section_expander(
+            "UKRI grants", self.gtr_box, "ukri_grants")
+        self.append(self.gtr_label)
+
         self.append(Gtk.Separator())
 
         # --- Sort toggle: most-recent vs most-cited -------------------
@@ -690,6 +703,7 @@ class AuthorPage(Gtk.Box):
         # Local and cheap, so it fills before the network sections
         # rather than after them.
         self._fill_funding()
+        threading.Thread(target=self._do_gtr, daemon=True).start()
         threading.Thread(
             target=self._do_fetch, args=(orcid, oa_id),
             daemon=True).start()
@@ -957,6 +971,97 @@ class AuthorPage(Gtk.Box):
         _set_section_count(self.funding_label,
                            "Funders on the papers you have", len(rows))
         self.funding_label.set_visible(True)
+
+    def _do_gtr(self):
+        """Look this author up in Gateway to Research, cache, show.
+
+        Cached by trail key for 30 days, misses included: most
+        authors are not UK-funded, and re-asking GtR on every page
+        open would be a request per open to learn nothing again."""
+        key = index.author_trail_key(self.authorship)
+        if not key:
+            return
+        conn = None
+        try:
+            conn = index.connect_existing(index.db_path_of(self.conn))
+        except Exception:
+            conn = None
+        payload = None
+        if conn is not None:
+            cached = index.get_author_funding(conn, key)
+            if cached and index.author_funding_fresh(cached):
+                payload = cached["payload"]
+        if payload is None:
+            try:
+                payload = gtr.grants_for_author(self.authorship)
+            except Exception as e:
+                print("gtr: lookup failed:", e)
+                payload = None
+            if payload is not None and conn is not None:
+                try:
+                    index.set_author_funding(conn, key, payload)
+                except Exception:
+                    pass
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        if payload:
+            GLib.idle_add(self._apply_gtr, payload)
+
+    def _apply_gtr(self, payload):
+        box = getattr(self, "gtr_box", None)
+        if box is None:
+            return False
+        while True:
+            child = box.get_first_child()
+            if child is None:
+                break
+            box.remove(child)
+        grants = (payload or {}).get("grants") or []
+        if not payload.get("matched") or not grants:
+            self.gtr_label.set_visible(False)
+            return False
+        for g in grants:
+            row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+            row.set_margin_start(4)
+            title = Gtk.Label(xalign=0.0)
+            role = "PI" if g.get("is_pi") else "Co-I"
+            title.set_markup(
+                "<span size='small' weight='bold'>{}</span>  {}".format(
+                    role, GLib.markup_escape_text(g.get("title") or "—")))
+            title.set_wrap(True)
+            title.set_max_width_chars(52)
+            row.append(title)
+            detail = Gtk.Label(xalign=0.0)
+            detail.set_markup(
+                "<span size='small' alpha='65%'>{}</span>".format(
+                    GLib.markup_escape_text(gtr.summarise_grant(g))))
+            detail.set_wrap(True)
+            detail.set_max_width_chars(52)
+            row.append(detail)
+            box.append(row)
+        total = gtr.total_awarded(grants)
+        if total:
+            foot = Gtk.Label(xalign=0.0)
+            n_pi = sum(1 for g in grants if g.get("is_pi"))
+            foot.set_markup(
+                "<span size='small' alpha='75%'>£{:,} across {} grant{} "
+                "as PI</span>".format(total, n_pi, "" if n_pi == 1 else "s"))
+            foot.set_margin_start(4)
+            foot.set_margin_top(4)
+            box.append(foot)
+        if payload.get("confidence") == "name":
+            note = Gtk.Label(xalign=0.0)
+            note.set_markup(
+                "<span size='small' alpha='55%'>matched by name, not "
+                "ORCID</span>")
+            note.set_margin_start(4)
+            box.append(note)
+        _set_section_count(self.gtr_label, "UKRI grants", len(grants))
+        self.gtr_label.set_visible(True)
+        return False
 
     def _collaborator_roles(self, works):
         """PI/Group verdicts for the frequent-collaborator chips.

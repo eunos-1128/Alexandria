@@ -733,6 +733,63 @@ def author_relations_fresh(cached, ttl_days=AUTHOR_RELATIONS_TTL_DAYS):
     return age <= datetime.timedelta(days=ttl_days)
 
 
+CREATE_AUTHOR_FUNDING = """
+CREATE TABLE IF NOT EXISTS authors.author_funding (
+    key          TEXT PRIMARY KEY,
+    payload_json TEXT NOT NULL,
+    computed_at  TEXT NOT NULL
+);
+"""
+
+
+# Days a cached GtR lookup stays fresh. Awards are announced, then
+# run for years; a month is generous and still catches a new grant
+# within one billing cycle of the reader caring.
+AUTHOR_FUNDING_TTL_DAYS = 30
+
+
+def get_author_funding(conn, key):
+    """The cached GtR payload for a trail key, or None."""
+    if not key:
+        return None
+    row = conn.execute(
+        "SELECT payload_json, computed_at FROM authors.author_funding"
+        " WHERE key = ?", (key,)).fetchone()
+    if row is None:
+        return None
+    try:
+        payload = json.loads(row["payload_json"])
+    except Exception:
+        return None
+    return {"payload": payload, "computed_at": row["computed_at"]}
+
+
+def set_author_funding(conn, key, payload):
+    """Store a GtR lookup. A no-match is stored too: "GtR has never
+    heard of this person" is an answer, and re-asking it on every
+    page open would be a request per open for the majority of
+    authors, who are not UK-funded."""
+    if not key or payload is None:
+        return
+    conn.execute(
+        "INSERT OR REPLACE INTO authors.author_funding"
+        " (key, payload_json, computed_at) VALUES (?, ?, ?)",
+        (key, json.dumps(payload),
+         datetime.datetime.now().isoformat(timespec="seconds")))
+    conn.commit()
+
+
+def author_funding_fresh(cached, ttl_days=AUTHOR_FUNDING_TTL_DAYS):
+    if not cached:
+        return False
+    try:
+        when = datetime.datetime.fromisoformat(cached["computed_at"])
+    except Exception:
+        return False
+    return (datetime.datetime.now() - when) <= datetime.timedelta(
+        days=ttl_days)
+
+
 CREATE_AUTHOR_WORKS_CACHE = """
 CREATE TABLE IF NOT EXISTS authors.author_works_cache (
     openalex_id  TEXT NOT NULL,
@@ -992,13 +1049,21 @@ def connect_existing(path):
     which is exactly what the workers used to do via the shared
     BrowserWindow.conn. No `check_same_thread=False` here — these
     connections are single-threaded by construction. Migrations are
-    skipped; they have already run via the GUI's `open_db`."""
+    skipped; they have already run via the GUI's `open_db` — but the
+    authors database is *attached*, not migrated, and a connection
+    without it cannot see `authors.author_trail` and the rest. A
+    worker that reads the trail or the funding cache gets "no such
+    table" otherwise."""
     conn = sqlite3.connect(path)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA busy_timeout = {}".format(_BUSY_TIMEOUT_MS))
     conn.execute("PRAGMA foreign_keys=ON")
     conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("ATTACH DATABASE ? AS authors", (authors_db_path(),))
+    except Exception as e:
+        print("index: could not attach the authors database:", e)
     return conn
 
 
@@ -1067,6 +1132,7 @@ def attach_authors_db(conn, path=None):
     conn.executescript(CREATE_AUTHOR_SCORES)
     conn.executescript(CREATE_AUTHOR_WORKS_CACHE)
     conn.executescript(CREATE_AUTHOR_RELATIONS)
+    conn.executescript(CREATE_AUTHOR_FUNDING)
     conn.executescript(CREATE_AUTHOR_TRAIL)
     _merge_author_tables_into_shared(conn)
     # Two catalogues can hold the same person under two key kinds,
