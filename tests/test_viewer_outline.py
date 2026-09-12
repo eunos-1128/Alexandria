@@ -154,3 +154,88 @@ def test_a_pdf_with_no_contents_opens_on_its_pages():
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
+
+
+# ---- destinations Poppler cannot resolve ---------------------------
+
+def test_pypdf_supplies_pages_poppler_could_not(tmp_path, monkeypatch):
+    """Elsevier writes named destinations as UTF-16 (`\\xfe\\xff…`).
+    PyGObject can only return `PopplerDest.named_dest` as UTF-8, so
+    reading it raises UnicodeDecodeError, `find_dest` never runs, and
+    every entry resolves to no page — a contents list that looks
+    right and navigates nowhere. Measured on
+    PIIS0969212624003319: 45 entries, 45 unresolved.
+
+    There is no way to reach those bytes through the introspected
+    API, so pypdf — already a dependency, and unbothered by UTF-16 —
+    supplies the page numbers instead.
+    """
+    pdf = str(tmp_path / "outlined.pdf")
+    _pdf_with_outline(pdf)
+    doc = viewer.open_document(pdf)
+
+    real = viewer.outline_entries(doc, pdf)
+    assert [e["page"] for e in real] is not None
+
+    # Simulate the Elsevier case: Poppler resolves nothing.
+    def unresolved(_page_num, _n_pages):
+        return None
+    monkeypatch.setattr(viewer, "dest_page_index", unresolved)
+    blind = viewer.outline_entries(doc)
+    assert all(e["page"] is None for e in blind)
+
+    # With a path to fall back on, the pages come back.
+    monkeypatch.undo()
+    monkeypatch.setattr(viewer, "_pypdf_outline_pages",
+                        lambda p: [0, 1, 1, 3, 4])
+    filled = viewer.outline_entries(doc, pdf)
+    assert [e["page"] for e in filled] == [0, 1, 1, 3, 4]
+
+
+def test_the_fallback_is_not_run_when_poppler_resolved_everything(
+        tmp_path, monkeypatch):
+    """A second full parse of a long PDF is not free."""
+    pdf = str(tmp_path / "outlined.pdf")
+    _pdf_with_outline(pdf)
+    doc = viewer.open_document(pdf)
+    called = []
+    monkeypatch.setattr(viewer, "_pypdf_outline_pages",
+                        lambda p: called.append(p) or [])
+
+    entries = viewer.outline_entries(doc, pdf)
+
+    assert entries and all(e["page"] is not None for e in entries)
+    assert called == []
+
+
+def test_a_mismatched_fallback_is_ignored(tmp_path, monkeypatch):
+    """Splicing by position is only safe when both walks agree on how
+    many entries there are."""
+    pdf = str(tmp_path / "outlined.pdf")
+    _pdf_with_outline(pdf)
+    doc = viewer.open_document(pdf)
+    monkeypatch.setattr(viewer, "dest_page_index", lambda *_a: None)
+    monkeypatch.setattr(viewer, "_pypdf_outline_pages", lambda p: [1, 2])
+
+    entries = viewer.outline_entries(doc, pdf)
+
+    assert all(e["page"] is None for e in entries)
+
+
+def test_pypdf_reads_the_outline_of_a_real_file(tmp_path):
+    pdf = str(tmp_path / "outlined.pdf")
+    _pdf_with_outline(pdf)
+
+    pages = viewer._pypdf_outline_pages(pdf)
+
+    assert len(pages) == 5
+    assert all(isinstance(p, int) for p in pages)
+
+
+def test_no_path_means_no_fallback_and_no_crash(tmp_path, monkeypatch):
+    pdf = str(tmp_path / "outlined.pdf")
+    _pdf_with_outline(pdf)
+    doc = viewer.open_document(pdf)
+    monkeypatch.setattr(viewer, "dest_page_index", lambda *_a: None)
+
+    assert all(e["page"] is None for e in viewer.outline_entries(doc))

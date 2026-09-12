@@ -33,6 +33,16 @@ _HEADER_RE = re.compile(
     r"^\s*(?:\d+[\.\)]?\s+)?(" + "|".join(_BIB_HEADERS) + r")\s*$",
     re.IGNORECASE)
 
+# The same headers, but run together with the first entry on one
+# line: Elsevier's two-column layout yields "REFERENCES14. Cawez, F.,
+# …" because the heading and the entry share a y-band. Requiring a
+# numbered marker immediately after keeps this from firing on prose
+# ("references therein"), and the caller strips the heading so the
+# entry underneath is parsed normally.
+_HEADER_GLUED_RE = re.compile(
+    r"^\s*(?:" + "|".join(_BIB_HEADERS) + r")(?=\d+[\.\)]\s)",
+    re.IGNORECASE)
+
 # Sections that legitimately follow the bibliography — stop parsing
 # when we see one (so we don't slurp supplementary material).
 _END_HEADERS = (
@@ -397,9 +407,17 @@ def parse_bibliography(pdf_path):
     header_page = None
     header_x = None
     header_y = None
-    for rec in lines:
+    for i, rec in enumerate(lines):
         if _HEADER_RE.match(rec[1]):
             header_page, _, header_x, header_y, _, _ = rec
+            break
+        glued = _HEADER_GLUED_RE.match(rec[1])
+        if glued:
+            header_page, _, header_x, header_y, _, _ = rec
+            # Keep the entry that got stuck to the heading; without
+            # this the bibliography starts one entry short and the
+            # marker walk never sees its number.
+            lines[i] = (rec[0], rec[1][glued.end():]) + tuple(rec[2:])
             break
     fallback_mode = False
     if header_page is None:

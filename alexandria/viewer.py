@@ -152,14 +152,52 @@ def dest_page_index(page_num, n_pages):
     return page if 0 <= page < n_pages else None
 
 
-def outline_entries(doc):
+def _pypdf_outline_pages(pdf_path):
+    """Zero-based page index per outline entry, in document order, or
+    `[]` if pypdf cannot read the file.
+
+    The fallback for named destinations Poppler hands back unusable.
+    See `outline_entries`."""
+    if not pdf_path:
+        return []
+    try:
+        from pypdf import PdfReader
+        reader = PdfReader(pdf_path)
+
+        def walk(items, out):
+            for item in items:
+                if isinstance(item, list):
+                    walk(item, out)
+                else:
+                    try:
+                        out.append(reader.get_destination_page_number(item))
+                    except Exception:
+                        out.append(None)
+            return out
+
+        return walk(reader.outline, [])
+    except Exception:
+        return []
+
+
+def outline_entries(doc, pdf_path=None):
     """The PDF's own table of contents, flattened into document order:
     `[{title, page, depth}, ...]`, where `page` is a zero-based page
     index or None for an entry that points nowhere.
 
     Publishers put this in the file and we were ignoring it. Poppler
     has one sharp edge here: for a document with no outline
-    `IndexIter.new` raises rather than returning None."""
+    `IndexIter.new` raises rather than returning None.
+
+    And a second, sharper one. A named destination is a byte string in
+    the PDF, and Elsevier writes it as UTF-16 — `\xfe\xff…`. PyGObject
+    can only hand `PopplerDest.named_dest` back as UTF-8, so reading it
+    raises UnicodeDecodeError, `doc.find_dest` never runs, and every
+    entry resolves to no page: a contents list that looks right and
+    navigates nowhere. There is no way to reach those bytes through
+    the introspected API, so when destinations come back unresolved
+    `pdf_path` lets pypdf — already a dependency, and unbothered by
+    UTF-16 — supply the page numbers instead."""
     if doc is None:
         return []
     try:
@@ -211,6 +249,14 @@ def outline_entries(doc):
         walk(it, 0)
     except Exception:
         pass
+    if out and any(e["page"] is None for e in out):
+        # Only pay for a second parse when Poppler actually failed to
+        # resolve something — see the named-destination note above.
+        pages = _pypdf_outline_pages(pdf_path)
+        if len(pages) == len(out):
+            for entry, page in zip(out, pages):
+                if entry["page"] is None and page is not None:
+                    entry["page"] = dest_page_index(page + 1, n_pages)
     return out
 
 
@@ -1282,7 +1328,7 @@ class PdfViewerWindow(Gtk.Window):
                 area.queue_draw()
 
     def _fill_outline(self):
-        entries = outline_entries(self.doc)
+        entries = outline_entries(self.doc, self.pdf_path)
         if not entries:
             self.outline_list.append(_sidebar_placeholder(
                 "This PDF has no table of contents"))
