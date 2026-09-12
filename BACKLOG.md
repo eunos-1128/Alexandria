@@ -854,6 +854,49 @@ Pending features, roughly grouped. Newest at the top of each section.
 
 - Page thumbnails sidebar.
 
+- **Sort the author trail.** Asked for 2026-09-10: the left-hand
+  panel of the Authors window needs a sort control —
+  alphabetically, by when the author was added (as now), and by
+  date of first publication.
+
+  **"As now" is not date-added, and the distinction matters.**
+  `list_author_trail` orders by `position`, which starts as
+  add-order but is rewritten by `move_author_trail` whenever a row
+  is dragged. The two agree until the first drag and then diverge
+  for good. `added_at` is stored, so a true date-added sort is
+  free; the manual arrangement should stay available as its own
+  option — "Custom", the default — or dragging silently stops
+  meaning anything.
+
+  **Alphabetical is free too.** `name` is on the row. Sort on
+  surname rather than the stored string, or "Airlie J. McCoy" files
+  under A.
+
+  **First publication is not free, and cannot be derived from what
+  we cache.** `fetch_author_profile` returns `counts_by_year`, but
+  OpenAlex caps that at roughly ten years — it would date Garib
+  Murshudov's first paper to 2016. `author_works_cache` holds one
+  page of works sorted by recency or citations, so the earliest is
+  not reliably in it either.
+
+  The clean answer is one extra request per author:
+
+      works?filter=author.id:<id>&sort=publication_date:asc&per-page=1
+
+  which returns exactly the first paper. Cache it as a column on
+  `author_trail` — it is a fact that only becomes wrong once, in
+  the unlikely event a career gains an earlier paper — and fetch it
+  lazily as authors are added, not in a sweep.
+
+  **Where the control goes.** The works list in the author page
+  already has a segmented Most recent / Most cited control; the
+  same shape in the sidebar header would be consistent, though
+  four options may want a dropdown instead. Persist the choice the
+  way the library's sort is persisted, so it survives a restart.
+
+  Worth noting the trail is now shared across catalogues, so this
+  is one setting, not one per catalogue.
+
 - **Condensed view for reference lists, expanding on click.**
   Asked for 2026-09-10. Each reference row shows title, authors,
   journal and year — which is what it shows now — but tightly, with
