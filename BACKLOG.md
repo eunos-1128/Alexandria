@@ -66,6 +66,44 @@ Pending features, roughly grouped. Newest at the top of each section.
   Logging "reconcile: N imported, M duplicates, K errors" would have
   made both faults obvious immediately.
 
+- **DONE 2026-09-12 — all three parts.** Fixed during the triage
+  that filed this entry:
+
+    - **(a) punctuation** — not ours to fix and not worth
+      post-processing: we were on citeproc-py 0.9.2 against a
+      current 0.11.1, and every one of the four defects is fixed
+      upstream. `Chen, Y.& Nielsen, J..` became `Chen, Y., &
+      Nielsen, J.`, `101–120.https://` gained its space, and
+      Chicago went from `Y. Chenand J. Nielsen2025“Metabolic…` to a
+      correctly punctuated citation. Pin is now `>=0.11.1` with a
+      test asserting it (`2eacc5a`).
+    - **(b) `type: document`** — no longer reproduces. Under 0.11.1,
+      `document`, `article` and `article-journal` render identically
+      in APA, so the style-steering the entry describes was a 0.9.2
+      artefact. 50 of 200 papers still map to `document` (those with
+      no journal); mapping preprints to `article` remains a nicety
+      rather than a defect.
+    - **(c) volume/issue/pages** — was stale data, as recorded, and
+      regenerating the sidecars fixed it.
+
+  **And the regeneration exposed a crash**, which is how the rest
+  came to light: with `pages` populated for the first time,
+  `chicago-author-date` raised `UnboundLocalError` on every page
+  range, because the vendored style asks for CSL 1.0.2's
+  `page-range-format="chicago-16"` and 0.9.2 implemented only the
+  older `chicago`. Fixed by the upgrade rather than by editing the
+  style (`1786234`, reverted in `2eacc5a`).
+
+  **One fault was genuinely ours:** Vancouver and Nature rendered
+  `[1]Shi` and `1.Shi`. Both set `second-field-align="flush"`, which
+  a rendered page expresses as a column and plain text cannot, so
+  the separator was simply absent. Fixed in `csl_format` (`754f552`).
+
+  Measured after: 800 combinations of every sidecar and every style
+  render, none raises, none opens with an unspaced number.
+
+  Original entry:
+
 - **BUG: every citation the app produces is wrong.** Examined
   2026-09-11 across two cards, one preprint and one journal article.
   Three separable faults; the third is the one that cannot be fixed in
