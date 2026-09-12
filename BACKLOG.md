@@ -854,6 +854,54 @@ Pending features, roughly grouped. Newest at the top of each section.
 
 - Page thumbnails sidebar.
 
+- **Click a figure or table reference the way you click a citation.**
+  Asked for 2026-09-10. `[12]` already resolves and jumps; "Figure 3"
+  and "Table 1" sit in the same sentence and do nothing.
+
+  **The data is already stored.** Counted across the 82 JATS files
+  in the reference library:
+
+  | `ref-type` | xrefs | files |
+  | --- | --- | --- |
+  | `bibr` (what we use) | 6774 | 81 |
+  | `fig` | 1833 | 81 |
+  | `supplementary-material` | 593 | 21 |
+  | `table` | 230 | 51 |
+  | `sec` | 183 | 26 |
+  | `fn` | 50 | — |
+
+  Every file that carries citation markers carries figure markers
+  too, and `jats.parse_xrefs` already walks all of them — it filters
+  to `ref-type="bibr"` in one line and throws the rest away.
+
+  **Footnotes are not worth it.** 50 in the whole library, against
+  1833 figure references. This corpus is biology and
+  crystallography, where footnotes barely exist; the same entry
+  would look different for a humanities library, but ours is not
+  one.
+
+  **The half that is not solved: where the target is.** A citation
+  jump lands on a reference-list entry located by matching its text.
+  A figure jump has to land on the figure, and the anchor is the
+  caption — "Figure 3." or "Fig. 3" at the start of a text block —
+  which `references_pdf`'s anchor machinery can find the same way,
+  but the caption is not always on the page the figure is printed
+  on, and for a full-page figure there may be no text block at all.
+  Landing on the caption is probably right regardless: it is what a
+  reader is looking for.
+
+  **Check the publisher links first.** Sampled Elsevier PDFs carry
+  40–120 internal `GOTO_DEST` links in their first four pages alone
+  — far more than their citations — so figure references are very
+  likely already linked in the file. If so this is mostly a matter
+  of not discarding them: `pdf_links.read_citation_links` keeps the
+  ones it can tie to a bibliography entry, and a figure link is one
+  it currently drops. That would work without JATS, which is the
+  wider case.
+
+  Do the publisher-link path first and measure how much it covers
+  before writing any JATS-side code.
+
 - **Citation-graph view (Local-Citation-Network style).** Embed-free
   native implementation, since the dependency stack is already
   here: Cairo via `Gtk.DrawingArea` for rendering (same primitives
