@@ -4,6 +4,142 @@ Pending features, roughly grouped. Newest at the top of each section.
 
 ## Top priority
 
+- **BUG: a PDF that duplicates a ghost is silently orphaned when the
+  watcher misses it, and reconcile can never recover it.** Hits the
+  most natural Discover workflow, so it will recur.
+
+  **Reproduction (2026-09-07).** Discover → By title → search → click
+  a result → **DOI** (this creates the BibTeX ghost) → download the
+  PDF in the browser with the Firefox extension, which drops it into
+  the library root. Alexandria was running. The PDF was never
+  imported: no sidecar, no thumbnail, no index row — only the ghost
+  (`bibtex:<key>`). Restarting did **not** fix it, and cannot.
+
+  **Two independent faults, which is why it looks so stubborn.**
+
+  1. *The live event was missed.* The watcher's own log showed no
+     `[watcher] import start:` line. The mechanism is otherwise
+     sound — verified separately that the Firefox `.part` → rename
+     pattern fires `RENAMED` with `other` being the PDF, that this
+     still fires in a directory pre-populated to the library's 588
+     files, and that the catalogue root was correct. macOS uses
+     **GKqueueFileMonitor** (kqueue), not inotify; it reports coarser
+     events which GLib partly synthesises, so events can be dropped
+     under load — the app was mid-Discover-search and DOI fetch. Same
+     backend difference that caused the JATS-backfill toast storm.
+
+  2. *The safety net does not cover this case — this is the real
+     bug.* `watcher._do_import_with_conn` has a ghost-merge branch:
+     on `status == "duplicate"` whose match `is_ghost_path`, it calls
+     `bibtex_import.attach_pdf_to_ghost` to copy the PDF to
+     `<bibtex_key>.pdf`, merge the ghost's curation, drop the ghost
+     row and delete the source. **`importer.import_tree` has no such
+     branch** — it calls `import_pdf`, records the status and moves
+     on. Since `reconcile_startup` runs `import_tree`, every restart
+     re-reports `duplicate` and changes nothing. The file is orphaned
+     permanently.
+
+  Confirmed by running the real functions against a copy of the file
+  and its ghost sidecar: `import_pdf` returns
+  `("duplicate", bibtex:<key>)` with `is_ghost_path` true — so the
+  merge *would* fire from the watcher — while `import_tree` over the
+  same directory leaves no sidecar, no merged copy, and only the
+  ghost row in the index.
+
+  **Fix: move the ghost-merge dispatch out of the watcher into the
+  shared import path**, so every caller gets it. `attach_pdf_to_ghost`
+  already does the work; only the dispatch is in the wrong place. A
+  `duplicate` whose match is a ghost should always mean "attach",
+  regardless of which caller noticed the file. That fixes fault 2 and
+  makes fault 1 self-healing, because reconcile would then rescue
+  anything a dropped event missed.
+
+  **Related, and worth doing anyway: reconcile more than once.** A
+  dropped kqueue event is invisible — this was only noticed because
+  it was being watched for. Running `import_tree` periodically, or on
+  window focus, rather than only at startup would let a missed event
+  heal within minutes. It is already idempotent, so it is safe to
+  repeat; the cost is a directory walk.
+
+  **Diagnostic note:** reconcile prints nothing on completion, so a
+  silent startup looks identical to one that found nothing wrong.
+  Logging "reconcile: N imported, M duplicates, K errors" would have
+  made both faults obvious immediately.
+
+- **BUG: every citation the app produces is wrong.** Examined
+  2026-09-11 across two cards, one preprint and one journal article.
+  Three separable faults; the third is the one that cannot be fixed in
+  the formatter.
+
+  Verbatim output for `d-80-00766.pdf` (Acta Cryst D, 2024 — a
+  complete, well-formed record):
+
+      APA        Keegan, R. M., Simpkin, A. J.& Rigden, D. J.. (2024). The
+                 success rate … era. Acta Crystallographica Section D
+                 Structural Biology.https://doi.org/10.1107/S2059798324009380
+      Vancouver  [1]Keegan RM, Simpkin AJ, Rigden DJ. The success rate … era.
+                 Acta Crystallographica Section D Structural Biology 2024.
+                 https://doi.org/10.1107/S2059798324009380.
+      Nature     1.Keegan, R. M., Simpkin, A. J. & Rigden, D. J.. The success
+                 rate … era. Acta … Biology https://doi.org/10.1107/… (2024)
+                 doi:10.1107/S2059798324009380.
+
+  **(a) Punctuation — four systematic defects, all from citeproc-py.**
+
+    - missing space after the number: `[1]Keegan`, `1.Keegan`
+    - doubled period after a final initial: `Rigden, D. J..`
+    - missing space before `&`: `Simpkin, A. J.& Rigden` (APA)
+    - missing space after the title/venue period: `Biology.https://`
+    - Nature additionally prints the **DOI twice**, as a URL and again
+      as `doi:…`
+    - Chicago is worst: `Simpkinand D. J. Rigden2024“The Success Rate…`
+
+    Ruled out: it is **not** the plain-text formatter (`formatter.html`
+    produces identical defects) and **not** the CSL styles (the
+    vendored canonical files). It is citeproc-py's affix joining and
+    `initialize-with` handling. Confirmed independent of the data — the
+    identical four defects appear on a preprint with no venue *and* on
+    this complete journal record.
+
+    Fix options: post-process citeproc's output for the four patterns
+    (cheap, ugly, effective), or replace the renderer.
+
+  **(b) `csl.sidecar_to_csl` emits `"type": "document"`, which is not a
+  valid CSL item type.** Separate real bug. It does not cause (a) —
+  rendering with `article-journal`, `article` and `manuscript` leaves
+  the punctuation defects unchanged — but it silently steers style
+  logic: under `article` Nature emits `at https://doi.org/…`, and
+  under `article-journal` it drops the `(2026)` entirely. Preprints
+  should probably be `article`, journal papers `article-journal`.
+
+  **(c) Volume / issue / pages — NOT a code bug; already fixed.**
+  Investigated and closed 2026-09-11. `a7b16d2 feat(metadata): volume,
+  issue and pages` added the sidecar schema (`sidecar.py:88`), the CSL
+  mapping (`csl.py:149`) and the editor fields
+  (`edit_dialog.py:533`); the importer reads them from whichever
+  source resolved the DOI (`importer.py:343-360`, whose comment records
+  the original symptom — *"a 178-entry BibTeX export had not one
+  volume, number or pages field despite 146 of the entries having a
+  DOI"*). `fetch_work_by_doi` returns them correctly today: for
+  `10.1107/S2059798324009380`, volume **80**, issue **11**, pages
+  **766-779**.
+
+  All that remains is **stale data**: of 171 sidecars only three carry
+  the keys and all three are `null`, because everything else was
+  imported before the fix. New imports are fine. A refresh pass would
+  clean the history up whenever someone cares — it is housekeeping,
+  not a defect, and nothing here needs code.
+
+  Recorded only so the next person examining a wrong citation does not
+  re-diagnose it as a missing feature, as this entry originally did.
+
+  **Scope note:** all of this flows through `csl_format.format_citation`,
+  which also backs `csl_export.export_rows_to_file`. So every citation
+  the app has ever exported carries these faults, not just the
+  clipboard menu. (a) and (b) are the real defects; they are in the
+  renderer and affect every citation regardless of how complete the
+  record is.
+
   Nothing outstanding.
 
   - *(Closed 2026-08-31: the PDB indexer's "another row available"
@@ -748,6 +884,55 @@ Pending features, roughly grouped. Newest at the top of each section.
   extension (read-side, finds free PDFs) — see
   `docs/related-unpaywall-extension.md` in the sister repo.
 
+- **GetFTR (Get Full Text Research) — considered and deferred
+  (2026-09-11).** A publisher-run entitlement API: `POST` a batch of
+  DOIs plus an institution identifier, and participating publishers
+  answer in real time whether this user's institution has access, with
+  a direct link. Free to integrate, and explicitly open to "reference
+  management tools", so we qualify by category.
+
+  **Why not now — the answer arrives in the wrong shape.** It returns
+  *a link for a human to click*, not a file. At the moment we care,
+  the job is getting a PDF onto disk. So what GetFTR would actually
+  power is the "Open via EZproxy"-shaped affordance already described
+  in the EZproxy entry — and EZproxy does that today with no
+  registration, no third party and no institution-picker.
+
+  **Practical friction:**
+
+    - Registration is manual — email `joinus@getfulltextresearch.com`
+      with the platform name and *"domain(s) where the button will be
+      embedded"*. That assumes a web integration; a desktop app has no
+      domain.
+    - It needs an institution identifier: either the end-user IP
+      (works only when actually on the institution's network) or a
+      SAML `entityID`, which means building an institution-selection
+      widget.
+    - Request shape, for reference:
+      `POST {"org": {...}, "dois": [...]}`, DOIs as strings or
+      objects, `uid` per entry to correlate results.
+
+  **The one thing it offers that EZproxy cannot:** it answers "do I
+  have access?" *in advance*, in bulk, without clicking. That is
+  genuinely interesting for the **"fetch when inside the firewall"
+  waiting list** — it could mark which paywalled papers are actually
+  obtainable at the user's institution, rather than finding out one
+  click at a time. Reconsider if that feature gets built.
+
+  **Not a reason to adopt it:** GetFTR also returns retraction and
+  errata data from Crossref and Retraction Watch. We already have
+  that — `metrics._crossmark_from_message` with a ranked severity
+  table (retraction / partial_retraction / …), `is_retracted` from
+  OpenAlex, and `browse.make_crossmark_chip` rendering it red on the
+  card. It would duplicate working code.
+
+  Privacy, for the record: GetFTR's FAQ states it does not track
+  individual users and does not make user-level data available to
+  third parties, and that publishers commit not to track via the IP
+  addresses it passes on. The service has drawn criticism as a
+  publisher-governed alternative to repository links; that is a
+  judgement call rather than a technical blocker.
+
 - **EZproxy support for paywalled fetches.** Currently "Get PDF"
   on a ghost card chases OpenAlex's `oa_url` only — fine for
   open-access papers, useless for paywalled ones. EZproxy is
@@ -1045,52 +1230,6 @@ Pending features, roughly grouped. Newest at the top of each section.
 
   Cheap enough to do before the sioyek-style target indexing, and
   independent of it.
-
-- **Review Paperlib, and ask whether the metadata chain wants to be
-  an adapter interface.** Filed 2026-09-10 after seeing Paperlib's
-  extension marketplace.
-
-  Paperlib ships a small core and pushes metadata sources out to
-  installed extensions — `metadata-scrape`, `entry-scrape`, and
-  field-specific ones like `cn-scrape` (Chinese papers) and
-  `ccf-rank` (Chinese CS venue rankings). Ours is hard-wired, in
-  `extract._enrich` and `metrics`: page-1 raw scan → filename
-  decoders → 4-page scan → CrossRef → OpenAlex, with JATS behind
-  that.
-
-  **The question is not "should Alexandria have plugins".** For a
-  single-user local app that is a lot of machinery for little, and
-  a marketplace is a maintenance burden with a security surface.
-  The narrower question is whether the *source chain* should sit
-  behind a common interface — `resolve(identifier) -> record`, with
-  an ordered list of adapters — even if every adapter ships in the
-  repo and nothing is installable.
-
-  **Two arguments that it should**, both already in this file:
-    - the GtR entry above concludes exactly this for funders, "each
-      funder as a pluggable adapter behind a common interface,
-      shipping one source at a time";
-    - `cn-scrape` and `ccf-rank` exist because a fixed chain cannot
-      serve a field it was not written for. Ours is tuned to
-      structural biology and crystallography — which is the right
-      call for its user, and the reason it would serve a historian
-      or an economist badly.
-
-  **An argument that it should not:** the chain's *order* carries
-  hard-won knowledge — raw before layout, filename decoders
-  chained rather than replaced, CrossRef before the page scrape —
-  and every one of those orderings was a bug fix. An adapter list
-  makes the order configurable, and a user who reorders it gets the
-  bugs back.
-
-  **Also worth noting: half the marketplace is what we build
-  inline.** citation-count, ai-summary, paper-locate, preview — we
-  have all four. That the feature set matches is reassuring; that
-  they chose to make them extensions is the part to think about.
-
-  Read before deciding: how Paperlib's scrape extensions declare
-  what they can handle, and whether the core picks one or runs them
-  all.
 
 - **Review sioyek and Hammer PDF.** Asked for 2026-09-10. Two
   existing readers aimed at exactly our reader — someone working
@@ -2265,6 +2404,66 @@ via `extract.CROSSREF_USER_AGENT`.
   data.
 
 ## OpenAlex client
+- **Behave gracefully when there is no OpenAlex key.** OpenAlex is
+  reported to require a registered API key from February 2026 (seen in
+  search results, worth confirming against their docs). A key is
+  configured on this machine today, so the problem is latent — which
+  is exactly why it will be discovered by a *user* rather than by us.
+
+  **What happens today, traced 2026-09-11:**
+
+    - `_apply_openalex_key` (`metrics.py:256`) is a deliberate no-op
+      when no key is set — the request simply goes out
+      unauthenticated. Correct as written; the question is what
+      happens to the response.
+    - `_http_get_json` (`metrics.py:282`) retries 429 and 5xx, and
+      **"all other errors return None immediately"**. So a **401 or
+      403 — precisely what an unauthenticated request will start
+      returning — is swallowed and reported as `None`.**
+    - Callers cannot distinguish that `None` from "OpenAlex has no
+      record for this DOI". They are the same value.
+
+  **So the failure mode is silence, and it is the worst kind.**
+  Without a key the app would not error, would not warn, and would not
+  degrade visibly — it would behave as though every paper in the
+  world were unknown to OpenAlex. Enrichment stops, citation counts
+  stop updating, author pages come back empty, Discover returns
+  nothing. Every symptom looks like "the data isn't there" rather than
+  "we are not authenticated".
+
+  Note the existing machinery handles the *quota* case properly —
+  `OpenAlexQuotaExhausted`, the circuit breaker, `_note_openalex_credits`,
+  `openalex_credits_below` — so the pattern for surfacing a
+  service-level problem already exists. It simply does not cover
+  auth.
+
+  **What graceful should mean:**
+
+    - **Distinguish auth failure from absence.** 401/403 must not
+      return the same `None` as "no such work". At minimum log it
+      distinctly; better, raise something callers can catch, as 429
+      already does.
+    - **Say it once, clearly.** A toast or status line naming the
+      cause — "OpenAlex requires an API key; set one in
+      Preferences" — not one message per paper. The citation
+      refresher walks the whole library, so a per-call warning would
+      be a storm.
+    - **Stop asking.** Trip the existing breaker on repeated 401s
+      rather than making one doomed request per paper for the rest of
+      the session.
+    - **Degrade to what still works.** Crossref needs no key; stored
+      JATS needs no network at all; cached citation counts and the
+      `author_works_cache` are already on disk. An unkeyed Alexandria
+      should still open, read, annotate and search — it should lose
+      enrichment, not usability.
+    - **Make the remedy reachable.** The message should point at where
+      the key goes, since a user who has never had one will not know
+      Preferences holds a field for it.
+
+  Worth testing by simply clearing the key and using the app for ten
+  minutes — the current behaviour is easy to observe and has probably
+  never been looked at.
+
 - **Author-view works cache: lengthen the TTL, and stop blocking on
   stale rows.** Requested as "cache the Author View publications so
   reopening tomorrow doesn't wait on OpenAlex". Most of that already
@@ -2497,6 +2696,86 @@ via `extract.CROSSREF_USER_AGENT`.
   `pdforg/styles/`. Add a Preferences entry that lets users drop
   additional `.csl` files into `~/.config/Alexandria/styles/` and
   have them picked up by `csl_format.list_styles()`.
+## Citation network of the library
+
+Adapted from a prompt by OpenAlex's own author, vibe-coding on video:
+*"find all papers that mention altmetrics … then find all the
+citations between all those papers and make a network visualization …
+click a node, it links to OpenAlex."* The clever part of that is the
+**induced subgraph** — citations *between* the selected papers, not
+the whole citation graph — which is what makes it tractable.
+
+**The transformation worth making: run it over the user's own
+library, not an arbitrary topic.** A topic network is Discover-shaped
+and any web tool can build one; it is a disposable snapshot of
+something you do not own. The network of *your* collection — which of
+your papers cite which others — is a thing only this app can draw,
+because only it knows the collection.
+
+### It is already computable, offline, today
+
+Measured 2026-09-09 against the live library:
+
+| | |
+|---|---|
+| JATS files present | 71 |
+| Reference lists parsed | 71 (**4,030** references) |
+| **Intra-library citation edges** | **93** |
+| Papers in the graph | 60 |
+| Network calls required | **zero** |
+
+`jats.parse_ref_list()` returns structured references carrying DOIs,
+so the graph builds from files already on disk. Edges are meaningful
+on inspection (Foldseek → AlphaFold; the fragment-screening papers
+citing one another).
+
+**Do not build it from the caches.** Only **1** sidecar has
+`references_cache` and **8** have `cited_by_cache` — they populate
+lazily when the user clicks References / Cited-by on a card, so they
+are empty in the general case. JATS is the spine; `references_cache`
+and OpenAlex `referenced_works` are the fallback for the 59
+DOI-bearing papers that have no JATS. Coverage grows as the JATS
+backfill does, and edges grow faster than coverage, since an edge
+needs only *one* end parsed.
+
+### Second feature from the same extraction: what the library is missing
+
+Of the 4,030 references, **2,877 distinct DOIs are cited by the
+library but absent from it**. Ranked by how many of your own papers
+cite them, that is a genuinely useful "you should probably own this"
+list. Top hits measured: Coot (12x), Phaser (10x), the PDB paper
+(9x), REFMAC5 (8x), CCP4 (7x), SHELX (6x).
+
+That it can tell the user their library cites Coot twelve times and
+does not contain it is a good demonstration of why the *library*
+framing beats the *topic* framing.
+
+### Rendering
+
+`GtkDrawingArea` + Cairo, exactly as `_draw_histogram` already does.
+Force-directed layout over 60–200 nodes is comfortable in Python and
+keeps the offline-first stance intact. **Not** WebKitGTK + d3: a JS
+runtime and a heavy dependency for one view, and it would be the
+first thing in the app that cannot work offline. The pretty,
+shareable version belongs in the Static HTML index section below,
+where an interactive export is already the point.
+
+Two design choices to improve on the original prompt:
+
+- **Put time on an axis.** A citation network is a DAG in time —
+  nothing cites the future — so year is the most informative layout
+  dimension available, and a free-floating force-directed blob throws
+  it away. With time flowing one way the structure reads at a glance:
+  the seminal papers everything points back to, the recent cluster,
+  the isolated branches.
+- **Size nodes by in-degree *within the library*,** not by global
+  citation count. "What is my collection built around" is the
+  question the user actually has; global counts just re-rank by fame.
+
+Click-through should go to the card, not to OpenAlex — the paper is
+in the library, so the app already has somewhere better to send them.
+
+
 ## Static HTML index (Drive-syncable companion view)
 
 - **Goal: armchair reading on a tablet, via Google Drive sync of
@@ -2568,6 +2847,78 @@ via `extract.CROSSREF_USER_AGENT`.
   folder).
 
 ## UI
+
+- **Copy a card's BibTeX (and RIS) to the clipboard.** There is no way
+  to get the BibTeX text for a single paper. Everything needed already
+  exists and is one hop short of being wired up:
+
+    - `bibtex_export.sidecar_to_bibtex_record(rec, pdf_path)` returns a
+      record dict and `records_to_text(records)` renders it. Both work
+      on a single record — nothing is list-only.
+    - But the only caller is `export_rows_to_file(rows, path)`
+      (`browse.py:2845`), a file-save dialog over the whole current row
+      set. Same for RIS (`:2895`) and CSL (`:2943`).
+    - The card's right-click **"Cite this paper as…"** popover
+      (`_show_cite_menu`, `browse.py:1627`) iterates
+      `csl_format.list_styles()` and copies a formatted citation to the
+      clipboard — APA, Vancouver, Nature, Chicago. BibTeX is absent
+      because it is not a CSL style; it lives in another module with a
+      different shape.
+
+  So the gap is one menu entry plus:
+
+    ```python
+    rec = _sidecar_record(row["sidecar_path"])
+    text = bibtex_export.records_to_text(
+        [bibtex_export.sidecar_to_bibtex_record(rec, row["pdf_path"])])
+    ```
+
+  `_do_copy_citation` (`browse.py:1664`) already owns the clipboard
+  write and the toast, so this is a sibling of it, not new plumbing.
+  RIS has exactly the same gap and the same fix.
+
+  **Give the formats their own mini-section in the same popover.**
+  "Cite this paper as…" lists prose citation *styles*; BibTeX and RIS
+  are data *formats* and do not belong in that list:
+
+      Cite this paper as…        Extract as…
+        APA                        BibTeX
+        Vancouver                  RIS
+        Nature
+        Chicago
+
+  **Heading: "Extract as…"** (decided 2026-09-11). *Export* was the
+  first idea and was rejected: the hamburger BibTeX / RIS / CSL items
+  already use it to mean writing a **file** through a save dialog
+  (`export_rows_to_file`), so a card menu offering "Export as →
+  BibTeX" that silently copied to the clipboard would contradict the
+  app's own usage. "Extract" also reads better for what is happening —
+  deriving a structured record from the paper rather than shipping a
+  file.
+
+  Noted for whoever implements it: "extract" has a competing sense in
+  a PDF application (extracting pages or text — `extract.py` does
+  exactly that internally), and "Copy as…" would be unambiguous about
+  the clipboard destination. Considered and set aside in favour of
+  "Extract as…"; if user confusion ever shows up, that is the
+  alternative.
+
+- **The "Cite this paper as…" menu is undiscoverable.** It is bound to
+  right-click on the card's outer box (`browse.py:1359-1365`,
+  `set_button(3)`), and nothing on the card advertises it — no
+  tooltip, no cursor change, no icon. It was missed by its own author.
+
+  Note this is the **second** place a real feature hides behind
+  right-click with no hint; the proposed collaborator-chip "shared
+  papers" (see `## UI`) would be the third. The avatar menu
+  (commit 7b1c940) already learned this lesson and fixed it *locally*
+  with a tooltip and a pointer cursor. Before inventing a third
+  one-off affordance, it is worth deciding on a single convention for
+  "this thing has a context menu" and applying it to all of them.
+
+  Cheapest version: a tooltip on the card. The action row already
+  carries nine buttons, so adding a tenth for citation is the less
+  attractive option.
 - **DONE 2026-09-06** — `BrowserWindow._author_avatar`, a leading
   column in the popover grid spanning both of an author's rows.
   Built as specified below: `Adw.Avatar` with a custom image and
@@ -3240,6 +3591,35 @@ makes our viewer (highlights, comments, citation-following with
 jump-back) and the Authors side the durable differentiators. Two
 things it does better:
 
+- **Should the metadata chain be an adapter interface?** Raised
+  2026-09-10 on seeing Paperlib's extension marketplace, where
+  sources are installed rather than compiled in — including
+  field-specific ones (`cn-scrape` for Chinese papers, `ccf-rank`
+  for Chinese CS venues) that a single fixed chain could not serve.
+
+  Not "should Alexandria have plugins": for a local single-user app
+  that is a lot of machinery and a security surface. The narrower
+  question is whether the source chain should sit behind a common
+  `resolve(identifier) -> record` with an ordered adapter list, even
+  with every adapter shipped in-repo and nothing installable.
+
+  **For:** the GtR entry reaches exactly this conclusion for funders
+  ("each funder as a pluggable adapter behind a common interface");
+  and the widening above — Semantic Scholar, preprint servers,
+  Europe PMC — is a list of adapters written as prose.
+
+  **Against:** the chain's *order* is hard-won. Raw before layout,
+  filename decoders chained rather than replaced, CrossRef before
+  the page scrape — every one of those was a bug fix, three of them
+  in the week of 2026-09-08. Making the order configurable hands the
+  bugs back.
+
+  Also worth noting four of Paperlib's marketplace extensions —
+  citation-count, ai-summary, paper-locate, preview — are things we
+  build inline. That the feature sets match is reassuring; that they
+  chose to externalise them is the part to understand before copying
+  either approach.
+
 - **Widen the metadata scrapers.** Their source list is materially
   wider than our OpenAlex + Crossref + Unpaywall + PDBe: arXiv,
   Semantic Scholar, Google Scholar, Springer, Scopus, openreview,
@@ -3262,6 +3642,55 @@ things it does better:
       arXiv for the physical sciences. OpenAlex is often thin or late
       on preprints, the same freshness gap
       `feed._fetch_landing_pdf_url` already works around.
+
+      **Promoted 2026-09-09 — Europe PMC already indexes preprints and
+      one call returns most of a Discover row.** We reach Europe PMC
+      today only for JATS full text (`jats.py`), but its `search`
+      endpoint indexes bioRxiv/medRxiv preprints directly and needs no
+      key. Measured against a live query — bioRxiv preprints from 2026
+      with "cryo-EM" and "model building" in the abstract, 10 hits:
+
+        - **`resultType=core` is the whole trick.** The default is
+          `lite`, which returns identifiers and a flat `authorString`
+          and **no URLs at all** (the only link-ish key is the boolean
+          `hasLabsLinks`). `core` adds `abstractText` (~1,700 chars
+          each, present on all 10), a structured `authorList`, and a
+          `fullTextUrlList`. Response grows 6.8 KB → 44.6 KB.
+        - So a single call yields **title, abstract, authors, DOI and
+          date** — most of what `_build_work_row` needs, for a source
+          OpenAlex is late on. That is the argument for doing this
+          before the other scrapers.
+        - **Europe PMC's own flags understate reachability badly —
+          the PDFs *are* fetchable.** All 10 report `hasPDF: "N"`,
+          `inEPMC: "N"`, and only one is `isOpenAccess: "Y"`;
+          `fullTextUrlList` gives 11 URLs of which 10 are just the DOI
+          rebuilt. On that evidence this looks metadata-only. It is
+          not: resolving the DOI lands on
+          `biorxiv.org/content/<doi>v1` and **appending `.full.pdf`
+          returns the paper**. Verified on 4 of the 10 (2026-09-09):
+          HTTP 200, `application/pdf`, 9–20 MB each, including three
+          flagged `isOpenAccess: "N"`.
+
+          So the fetch route is *construction*, exactly like the
+          Copernicus rule: DOI → resolve → append `.full.pdf`. It
+          belongs in `pdf_fetch` as a bioRxiv strategy, and it means
+          Europe PMC preprint search delivers a **complete** Discover
+          row — metadata, abstract *and* an obtainable PDF — rather
+          than a dead end.
+
+          Lesson worth generalising: `hasPDF` / `isOpenAccess` describe
+          what *Europe PMC* holds, not what is reachable on the open
+          web. Trusting those flags as a proxy for "can we get this"
+          silently discards an entire preprint corpus.
+        - Query syntax that worked:
+          `(SRC:PPR) AND (PUBLISHER:"bioRxiv") AND (ABSTRACT:"…" AND
+          ABSTRACT:"…") AND (FIRST_PDATE:[… TO …])`, sorted
+          `P_PDATE_D desc`. `SRC:PPR` is the preprint corpus.
+        - **bioRxiv has a new DOI prefix**: these are all `10.64898/`,
+          not `10.1101/`. The "derive DOIs from publisher filename
+          conventions" entry above only knows `10.1101/<date.id>`, so
+          its bioRxiv rule silently misses everything recent — worth
+          fixing at the same time.
     - **Subject archives are for their own audiences.** NASA ADS
       (astronomy/astrophysics/planetary/heliophysics, 16M+ records,
       free API but needs an account token) is the definitive index
