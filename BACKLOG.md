@@ -884,15 +884,30 @@ Pending features, roughly grouped. Newest at the top of each section.
   rather than the app — the interesting part is which extractions
   they judged worth surfacing.
 
-  **What to look for, specifically.** Not a feature list: how they
-  locate a jump target when the PDF has no link annotations. That is
-  the hard half of our figure-navigation entry, and sioyek has an
-  answer that works on arbitrary files with no JATS. If its approach
-  is sound, it is a better foundation than ours for the no-JATS
-  case.
+  **How sioyek finds a jump target — read on 2026-09-10, clone at
+  `~/Projects/sioyek/sioyek`.** This was the open question in the
+  entry below, and the answer is one regex. `index_generic`
+  (`pdf_viewer/utils.cpp`) walks each page's characters and matches
+
+      (^|\n)[A-Z][a-zA-Z]{2,}\.?[ \t]+[0-9]+(\.[0-9]+)*
+
+  — a line beginning with a capitalised word of three or more
+  letters, then a number. That is "Figure 3", "Table 1", "Fig. 2",
+  "Section 4.1", "Algorithm 2", "Theorem 3.1", with no per-publisher
+  rules and nothing to configure. Each hit is stored with its page
+  and a y-offset taken from the character quads, so a click on
+  "Figure 3" in the body becomes a lookup. Equations get their own
+  pass (`\([0-9]+(\.[0-9]+)*\)`) and the bibliography a separate
+  keyed map.
+
+  It is much cruder than the anchor-matching we built for citations
+  and it covers far more: any captioned "Word N" in any PDF, no JATS
+  and no link annotations required. Worth trying before anything
+  cleverer — and it costs one pass over the page text we already
+  extract.
 
   Watch the licence: sioyek is GPL-3.0 and Alexandria is not, so
-  this is reading for approach, not for code.
+  this is reading for approach and reimplementing, not lifting code.
 
 - **Click a figure or table reference the way you click a citation.**
   Asked for 2026-09-10. `[12]` already resolves and jumps; "Figure 3"
