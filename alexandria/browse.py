@@ -1740,8 +1740,73 @@ def _show_cite_menu(gesture, x, y, row, parent_window):
                 s, row, parent_window, pop))
         outer.append(btn)
 
+    # A second heading rather than four more entries in the list
+    # above: those are prose citation *styles*, these are data
+    # *formats*, and BibTeX sitting under "Cite this paper as…"
+    # alongside APA and Chicago would be a category error.
+    #
+    # "Extract as…", not "Export as…": the hamburger menu already
+    # uses Export to mean writing a file through a save dialog, so a
+    # card menu offering "Export → BibTeX" that silently copied to
+    # the clipboard would contradict the app's own vocabulary.
+    outer.append(Gtk.Separator())
+    extract_header = Gtk.Label(xalign=0.0)
+    extract_header.set_markup(
+        "<small><span alpha='65%'>Extract as…</span></small>")
+    outer.append(extract_header)
+
+    for label, fmt in (("BibTeX", "bibtex"), ("RIS", "ris")):
+        btn = Gtk.Button(label=label)
+        btn.add_css_class("flat")
+        btn.set_halign(Gtk.Align.START)
+        btn.connect(
+            "clicked",
+            lambda _b, f=fmt, l=label: _do_copy_record(
+                f, l, row, parent_window, pop))
+        outer.append(btn)
+
     pop.set_child(outer)
     pop.popup()
+
+
+def _do_copy_record(fmt, label, row, parent_window, pop):
+    """Copy this paper as one BibTeX entry or one RIS record.
+
+    Both formats could already render a single record —
+    `sidecar_to_bibtex_record` and `sidecar_to_ris_lines` take one
+    paper, and nothing about them was list-only. The only callers
+    were the whole-library exports behind a save dialog, so there
+    was no way to get the BibTeX for the paper in front of you."""
+    try:
+        rec = sidecar.read(row["sidecar_path"])
+    except Exception as e:
+        parent_window._toast(
+            "Could not read sidecar: {}".format(e), timeout=6)
+        pop.popdown()
+        return
+    try:
+        if fmt == "bibtex":
+            text = bibtex_export.records_to_text(
+                [bibtex_export.sidecar_to_bibtex_record(
+                    rec, row["pdf_path"])])
+        else:
+            # lines_to_text takes one record's (tag, value) pairs,
+            # unlike records_to_text which takes a list of records.
+            text = ris_export.lines_to_text(
+                ris_export.sidecar_to_ris_lines(rec, row["pdf_path"]))
+    except Exception as e:
+        parent_window._toast(
+            "Could not build {}: {}".format(label, e), timeout=6)
+        pop.popdown()
+        return
+    if not text or not text.strip():
+        parent_window._toast(
+            "Nothing to copy — the record is empty", timeout=5)
+        pop.popdown()
+        return
+    parent_window.get_clipboard().set(text)
+    parent_window._toast("Copied as {}".format(label))
+    pop.popdown()
 
 
 def _do_copy_citation(style, row, parent_window, pop):
