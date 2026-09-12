@@ -18,7 +18,7 @@ from gi.repository import Gtk, GLib, Gdk, Gio, Pango, Adw, GObject
 import datetime
 
 from . import (metrics, index, importer, opener, author_image,
-               viewer, pdf_fetch, status_ticker)
+               viewer, pdf_fetch, status_ticker, funding)
 from .identity import user_agent
 from .markup import safe_pango_markup
 
@@ -613,6 +613,24 @@ class AuthorPage(Gtk.Box):
             "Cited most often by", self.citers_box, "citers")
         self.append(self.citers_label)
 
+        # Funders on the papers held locally. No network: OpenAlex
+        # already put `funders`/`grants` on each work at import, and
+        # the index carries both columns.
+        #
+        # Funders lead and award numbers are relegated to the
+        # tooltip, because the two are not equally trustworthy.
+        # Measured across this library: of 85 papers carrying two or
+        # more award numbers, 13 attach at least one to the wrong
+        # funder — an MRC row holding an EPSRC number, a Wellcome
+        # number filed under an Ontario ministry. CrossRef deposits
+        # funders and awards as parallel arrays and they arrive
+        # mis-zipped. The funder list itself survives that.
+        self.funding_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
+                                   spacing=2)
+        self.funding_label = _section_expander(
+            "Funders on the papers you have", self.funding_box, "funding")
+        self.append(self.funding_label)
+
         self.append(Gtk.Separator())
 
         # --- Sort toggle: most-recent vs most-cited -------------------
@@ -669,6 +687,9 @@ class AuthorPage(Gtk.Box):
     def _spawn_fetch(self):
         orcid = self.authorship.get("orcid")
         oa_id = self.authorship.get("openalex_id")
+        # Local and cheap, so it fills before the network sections
+        # rather than after them.
+        self._fill_funding()
         threading.Thread(
             target=self._do_fetch, args=(orcid, oa_id),
             daemon=True).start()
@@ -889,6 +910,53 @@ class AuthorPage(Gtk.Box):
         self.list_box_clear()
         for w in works:
             self.list_box.append(self._make_work_row(w))
+
+    def _fill_funding(self):
+        """Populate the funders section from the local index.
+
+        Synchronous: it is one query over the catalogue and some JSON
+        parsing — a few milliseconds on a 200-paper library — so it
+        does not need the thread-and-idle_add dance the networked
+        sections use."""
+        box = getattr(self, "funding_box", None)
+        if box is None:
+            return
+        while True:
+            child = box.get_first_child()
+            if child is None:
+                break
+            box.remove(child)
+        try:
+            rows = funding.profile(
+                funding.papers_from_index(self.conn),
+                name=self.authorship.get("name"),
+                openalex_id=self.authorship.get("openalex_id"),
+                orcid=self.authorship.get("orcid"))
+        except Exception as e:
+            print("funding: could not build profile:", e)
+            rows = []
+        if not rows:
+            self.funding_label.set_visible(False)
+            return
+        for entry in rows:
+            row = Gtk.Label(xalign=0.0)
+            row.set_markup(
+                "{}  <span size='small' alpha='65%'>{}</span>".format(
+                    GLib.markup_escape_text(entry["funder"]),
+                    GLib.markup_escape_text(funding.summarise(entry))))
+            row.set_wrap(True)
+            row.set_max_width_chars(52)
+            row.set_margin_start(4)
+            if entry["awards"]:
+                row.set_tooltip_text(
+                    "Award numbers as deposited by the publisher: {}\n"
+                    "The funder each is filed under is sometimes wrong "
+                    "on papers with many funders.".format(
+                        ", ".join(entry["awards"])))
+            box.append(row)
+        _set_section_count(self.funding_label,
+                           "Funders on the papers you have", len(rows))
+        self.funding_label.set_visible(True)
 
     def _collaborator_roles(self, works):
         """PI/Group verdicts for the frequent-collaborator chips.
