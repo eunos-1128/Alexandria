@@ -182,6 +182,22 @@ def _section_expander(title, child, pref_key):
     return exp
 
 
+def _set_section_note(expander, title, note):
+    """Put a word about what is happening in a section's own label.
+
+    These sections are collapsed by default, so the header is the
+    only part a reader sees — a spinner inside the body would be
+    hidden behind the disclosure triangle."""
+    lbl = expander.get_label_widget()
+    if lbl is None:
+        return
+    lbl.set_markup(
+        "<span size='small' alpha='65%'>{}  <i>{}</i></span>".format(
+            GLib.markup_escape_text(title),
+            GLib.markup_escape_text(note)))
+    expander.set_visible(True)
+
+
 def _set_section_count(expander, title, n):
     """Put the count in the section's label, so a collapsed section
     still says how much is behind it."""
@@ -1342,9 +1358,14 @@ class AuthorPage(Gtk.Box):
         threading.Thread(target=self._citers_worker, args=(oid,),
                          daemon=True).start()
 
+    def _on_citers_progress(self, message):
+        GLib.idle_add(_set_section_note, self.citers_label,
+                      "Cited most often by", message)
+
     def _citers_worker(self, oid):
         try:
-            top = metrics.fetch_top_citing_authors(oid)
+            top = metrics.fetch_top_citing_authors(
+                oid, on_progress=self._on_citers_progress)
         except Exception:
             top = None
         if top is None:

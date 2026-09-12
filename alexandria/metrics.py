@@ -3544,7 +3544,7 @@ def rank_citing_authors(groups, limit=TOP_CITING_AUTHORS,
 
 
 def fetch_top_citing_authors(openalex_id, limit=TOP_CITING_AUTHORS,
-                             timeout=60):
+                             timeout=60, on_progress=None):
     """Who cites `openalex_id` most often: `[{openalex_id, name,
     count}, ...]`, or None if OpenAlex could not be asked.
 
@@ -3552,9 +3552,25 @@ def fetch_top_citing_authors(openalex_id, limit=TOP_CITING_AUTHORS,
     at `MAX_CITES_OR_IDS` — for a prolific author that is their
     influential core, which is where nearly all the citations are, and
     it keeps the tally to a single exact request rather than several
-    batches whose counts would overlap. The second is the tally."""
+    batches whose counts would overlap. The second is the tally.
+
+    `on_progress(message)` names whichever call is outstanding. There
+    is no fraction to offer: the second call is one request that
+    OpenAlex spends a couple of seconds thinking about, and it is the
+    slow one — measured at 0.34s for the works and 2.17s for the
+    tally."""
     if not openalex_id:
         return None
+
+    def report(message):
+        if on_progress is None:
+            return
+        try:
+            on_progress(message)
+        except Exception:
+            pass
+
+    report("finding the most-cited works…")
     works_url = ("https://api.openalex.org/works?filter=author.id:" +
                  urllib.parse.quote(openalex_id) +
                  "&select=id&sort=cited_by_count:desc&per-page=" +
@@ -3568,6 +3584,7 @@ def fetch_top_citing_authors(openalex_id, limit=TOP_CITING_AUTHORS,
     url = citing_authors_url([i for i in ids if i], openalex_id)
     if url is None:
         return []            # a real answer: no works, so no citers
+    report("tallying who cites them…")
     d2 = _http_get_json(_apply_openalex_key(url),
                         {"User-Agent": OPENALEX_UA, "Accept": "application/json"}, timeout)
     if d2 is None:
