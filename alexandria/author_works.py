@@ -567,6 +567,16 @@ class AuthorPage(Gtk.Box):
         self.citing_impact_lbl.set_use_markup(True)
         self.citing_impact_lbl.set_visible(False)
         hleft.append(self.citing_impact_lbl)
+        # Determinate, unlike the fetch bar above: this walk knows
+        # how many works it has to get through before it starts, so
+        # a fraction here is a fact rather than a guess. It is also
+        # the only thing in the app slow enough to need one —
+        # minutes, for a prolific author.
+        self.impact_bar = Gtk.ProgressBar()
+        self.impact_bar.set_size_request(90, -1)
+        self.impact_bar.set_valign(Gtk.Align.CENTER)
+        self.impact_bar.set_visible(False)
+        hleft.append(self.impact_bar)
 
         header.append(hleft)
 
@@ -906,7 +916,9 @@ class AuthorPage(Gtk.Box):
         else:
             GLib.idle_add(self._show_citing_impact_pending)
         result = metrics.compute_citing_impact(
-            openalex_id, exclude_self_cites=True, polite_delay=0.0)
+            openalex_id, exclude_self_cites=True, polite_delay=0.0,
+            on_progress=self._on_impact_progress)
+        GLib.idle_add(self._hide_impact_bar)
         if not result:
             GLib.idle_add(self._hide_citing_impact_pending)
             return
@@ -916,6 +928,35 @@ class AuthorPage(Gtk.Box):
         except Exception:
             pass
         GLib.idle_add(self._apply_citing_impact, result, False)
+
+    def _on_impact_progress(self, message, done, total):
+        """Called from the compute thread; hop to the main loop."""
+        GLib.idle_add(self._apply_impact_progress, message, done, total)
+
+    def _apply_impact_progress(self, message, done, total):
+        lbl = getattr(self, "citing_impact_lbl", None)
+        bar = getattr(self, "impact_bar", None)
+        if lbl is None or bar is None:
+            return False
+        lbl.set_markup(
+            "<span size='small' alpha='55%'>Citing-impact: {}</span>".format(
+                GLib.markup_escape_text(message)))
+        lbl.set_visible(True)
+        if total:
+            bar.set_fraction(min(1.0, float(done or 0) / float(total)))
+            bar.set_visible(True)
+        else:
+            # The work list is still being pulled: no denominator
+            # yet, so pulse rather than sit at zero.
+            bar.set_visible(True)
+            bar.pulse()
+        return False
+
+    def _hide_impact_bar(self):
+        bar = getattr(self, "impact_bar", None)
+        if bar is not None:
+            bar.set_visible(False)
+        return False
 
     def _show_citing_impact_pending(self):
         self.citing_impact_lbl.set_markup(

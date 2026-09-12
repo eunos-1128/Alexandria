@@ -1049,7 +1049,8 @@ CITING_IMPACT_TOP_N_DEFAULT = 20
 
 def compute_citing_impact(openalex_id, exclude_self_cites=True,
                           polite_delay=0.0,
-                          top_n=CITING_IMPACT_TOP_N_DEFAULT):
+                          top_n=CITING_IMPACT_TOP_N_DEFAULT,
+                          on_progress=None):
     """Citing-paper impact for an author, bucketed by the kind
     of work being cited (software / method / idea).
 
@@ -1091,10 +1092,27 @@ def compute_citing_impact(openalex_id, exclude_self_cites=True,
     author is available separately via `fetch_author_profile`.
 
     Self-cite filtering happens server-side via OpenAlex's
-    filter negation. Pagination via cursor."""
+    filter negation. Pagination via cursor.
+
+    `on_progress(message, done, total)` is called as the walk
+    proceeds — `total` is the number of works being sampled, so a
+    caller can show a real fraction rather than a guess. This is the
+    slowest thing in the app (minutes for a prolific author) and the
+    only one that can honestly say how far along it is: the work
+    list is known before the expensive part starts."""
     aid = _normalize_author_id(openalex_id)
     if aid is None:
         return None
+
+    def report(message, done=None, total=None):
+        if on_progress is None:
+            return
+        try:
+            on_progress(message, done, total)
+        except Exception:
+            pass
+
+    report("Listing this author's works…")
 
     # Step 1: every Work by this author. Pull `title` so we can
     # classify; everything else is for the metric. Cursor
@@ -1135,9 +1153,12 @@ def compute_citing_impact(openalex_id, exclude_self_cites=True,
     # dominated by these anyway — for Cowtan, top-20 by citation
     # count covers >95 % of all his citers. Skips a 5–10× cost
     # multiplier on prolific authors at negligible accuracy loss.
+    n_all = len(works)
     if top_n is not None and len(works) > top_n:
         works.sort(key=lambda t: t[2], reverse=True)
         works = works[:top_n]
+    report("{} works; walking the citers of the top {}".format(
+        n_all, len(works)), 0, len(works))
 
     # Initialise empty buckets so the return shape is consistent
     # even for authors with zero works.
@@ -1165,7 +1186,9 @@ def compute_citing_impact(openalex_id, exclude_self_cites=True,
     # citing paper that hits multiple software works only counts
     # once for software; the same paper can land in multiple
     # buckets if it cites different kinds of works by this author.
-    for wid, kind, _cbc in works:
+    for _i, (wid, kind, _cbc) in enumerate(works):
+        report("Counting citers, work {} of {}".format(_i + 1, len(works)),
+               _i, len(works))
         bucket = buckets[kind]
         seen = bucket["seen"]
         cursor = "*"
@@ -1198,6 +1221,13 @@ def compute_citing_impact(openalex_id, exclude_self_cites=True,
                 c = w.get("cited_by_count")
                 if isinstance(c, int):
                     bucket["total"] += c
+            # Report per page, not just per work. A single work can
+            # take over a minute on its own — McCoy's Phaser paper
+            # is fifty pages of citers — and a progress line that
+            # only moved between works would look stalled for all
+            # of it.
+            report("Counting citers, work {} of {} ({:,} so far)".format(
+                _i + 1, len(works), len(seen)), _i, len(works))
             cursor = (data.get("meta") or {}).get("next_cursor")
             if cursor:
                 time.sleep(polite_delay)
