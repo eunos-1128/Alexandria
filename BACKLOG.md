@@ -854,6 +854,44 @@ Pending features, roughly grouped. Newest at the top of each section.
 
 - Page thumbnails sidebar.
 
+- **Condensed view for reference lists, expanding on click.**
+  Asked for 2026-09-10. Each reference row shows title, authors,
+  journal and year — which is what it shows now — but tightly, with
+  the vertical space cut and **no PDF icon**. Clicking a row expands
+  it into the full row we render today.
+
+  **The list is long enough for this to matter.** Sampled 23 papers
+  with a parsable bibliography: median **51** references, longest
+  **193**. At today's row spacing that is a popover you scroll for a
+  while, and the thing being scrolled past is mostly whitespace and
+  buttons.
+
+  Where the space goes now (`_build_pdf_ref_row`,
+  `browse.py:5028`): 6px top and bottom margin per row, 8px at each
+  side, 8px between the number and the text, a 4px-spaced vertical
+  box on the right holding an in-library label, an in-library
+  button and a DOI button. The text label wraps at word-char, so a
+  long reference is three or four lines. The per-row furniture, not
+  the reference, is what costs the height.
+
+  **Expansion, not a separate mode**, is the part worth keeping:
+  the reader scans a dense list, then opens the one they care
+  about and gets everything — the buttons, the in-library state,
+  the DOI action — without leaving the list or losing their place.
+  A `Gtk.Expander` per row, or a revealer, keeps one implementation
+  rather than two divergent row builders.
+
+  Open questions for when this is built:
+    - does the condensed row keep the reference number? It is the
+      cheapest column and the one a reader matches against `[41]`
+      in the text, so probably yes;
+    - does an expanded row collapse when another is opened, or do
+      several stay open? Accordion behaviour is tidier and one
+      more thing to be annoyed by;
+    - the in-library state is the one signal worth keeping visible
+      while condensed, since it is the reason to scan the list at
+      all — but as a mark rather than a button.
+
 - **Do not jump to the reference at all — the popover already has
   it.** Proposed 2026-09-10: if the reference text is in the
   popover, there is nothing to jump to and nothing to come back
