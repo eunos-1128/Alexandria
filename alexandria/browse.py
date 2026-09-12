@@ -3793,6 +3793,25 @@ class BrowserWindow(Adw.ApplicationWindow):
         finally:
             conn.close()
 
+    def _suppress_watcher(self, path, secs=120):
+        """Silence library-watcher events on `path`.
+
+        A drop copies the file into the library root, which the
+        watcher sees as an externally-added PDF and imports on its
+        own — in parallel with the import this thread is already
+        doing. The two then contend for the SQLite writer, and the
+        GUI thread, wanting the same lock, waits behind them: seven
+        files dropped at once froze the window for the full 30s
+        `busy_timeout`. The menu-driven import has always suppressed;
+        the drop path never did."""
+        w = getattr(self, "library_watcher", None)
+        if w is None:
+            return
+        try:
+            w.suppress(path, secs)
+        except Exception:
+            pass
+
     def _do_drop_import_with_conn(self, conn, paths):
         os.makedirs(self.library_root, exist_ok=True)
         results = {"imported": [], "duplicate": [], "exists": [],
@@ -3807,6 +3826,11 @@ class BrowserWindow(Adw.ApplicationWindow):
                 src_doi = None
             ghost = self._ghost_for_doi(src_doi) if src_doi else None
             if ghost:
+                # attach_pdf_to_ghost does its own copy into the
+                # library, under the BibTeX key; same race.
+                self._suppress_watcher(
+                    os.path.join(self.library_root,
+                                 (ghost.get("bibtex_key") or "") + ".pdf"))
                 try:
                     new_path, gstatus, gmsg = (
                         bibtex_import.attach_pdf_to_ghost(
@@ -3832,6 +3856,9 @@ class BrowserWindow(Adw.ApplicationWindow):
             if os.path.exists(target):
                 results["exists"].append((src, target, None))
                 continue
+            # Before the copy, not after: the watcher can see the
+            # file the moment it appears.
+            self._suppress_watcher(target)
             try:
                 shutil.copy2(src, target)
             except Exception as e:
