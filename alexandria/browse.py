@@ -3437,10 +3437,16 @@ class BrowserWindow(Adw.ApplicationWindow):
             if self._cit_stop.is_set():
                 return
             # If OpenAlex tripped its session breaker (daily quota
-            # exhausted), bail — the rest of this run would just
-            # log "OpenAlex rate-limited" per row.
+            # exhausted, or a key it would not accept), bail — the rest
+            # of this run would just log one failure per row. The
+            # refresher is the library-wide walk, so it is also the
+            # right place to notice an auth failure and say so once.
             if metrics.openalex_paused_until() > 0:
-                _wlog("citations", "OpenAlex paused, stopping refresher")
+                _wlog("citations", "OpenAlex paused ({}), stopping "
+                      "refresher".format(metrics.openalex_blocked_reason()
+                                         or "reason unknown"))
+                if metrics.openalex_auth_failed():
+                    GLib.idle_add(self._warn_openalex_auth)
                 return
             if row["pdf_path"] in self._cit_failed_session:
                 continue
@@ -4479,6 +4485,24 @@ class BrowserWindow(Adw.ApplicationWindow):
         except OSError:
             pass
         GLib.idle_add(self._get_pdf_done, status, msg, on_pdf_settled)
+
+    def _warn_openalex_auth(self):
+        """Say, once, that OpenAlex is refusing us for want of a key.
+
+        Without this the failure is invisible: enrichment returns the
+        same "nothing" it returns for a paper OpenAlex has never heard
+        of, so an unauthenticated library looks like a library of
+        unknown papers. Twelve seconds, because it names a preference
+        to go and set."""
+        if getattr(self, "_warned_openalex_auth", False):
+            return False
+        self._warned_openalex_auth = True
+        t = Adw.Toast.new(
+            "OpenAlex rejected the request — it needs an API key. Set "
+            "one in Preferences → Online services.")
+        t.set_timeout(12)
+        self.toast_overlay.add_toast(t)
+        return False
 
     def _warn_oa_source_unavailable(self, skipped):
         """Say when Get PDF is searching fewer sources than it could.

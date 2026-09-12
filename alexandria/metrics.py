@@ -55,10 +55,17 @@ def set_openalex_api_key(key):
     after the user pastes one in). A key supplied via the
     ALEXANDRIA_OPENALEX_API_KEY env var takes precedence and is never
     overwritten here."""
-    global _OPENALEX_API_KEY
+    global _OPENALEX_API_KEY, _ANNOUNCED_AUTH_FAILURE, _openalex_paused_until
     if os.environ.get("ALEXANDRIA_OPENALEX_API_KEY"):
         return
     _OPENALEX_API_KEY = (key or "").strip()
+    # A key arriving is the one thing that can fix an auth failure, so
+    # release the breaker it tripped and allow the message again — the
+    # new key may be rejected in its turn, and the user needs to hear
+    # that rather than wonder why nothing happened.
+    if _OPENALEX_API_KEY and _ANNOUNCED_AUTH_FAILURE:
+        _ANNOUNCED_AUTH_FAILURE = False
+        _openalex_paused_until = 0.0
 
 
 def openalex_api_key():
@@ -136,6 +143,77 @@ def openalex_credits_below(buffer):
     observation yet (don't gate on unknown state)."""
     return (_openalex_credits_remaining is not None
             and _openalex_credits_remaining < buffer)
+
+
+_AUTH_MESSAGE = ("OpenAlex rejected the request — it needs an API key. "
+                 "Set one in Preferences.")
+
+# One-shot flags: both of these conditions hold for every subsequent
+# request, so the message belongs to the session, not to the call. The
+# citation refresher walks the whole library; a per-call warning would
+# be a storm of identical lines.
+_ANNOUNCED_UNAUTHENTICATED = False
+_ANNOUNCED_AUTH_FAILURE = False
+
+# How long an auth failure pauses OpenAlex. Long, because nothing will
+# change until the user acts — but not permanent, since they might act.
+_AUTH_BREAKER_SECONDS = 3600.0
+
+# Dead ends already reported, so a library-wide walk says each distinct
+# (host, code) once rather than once per paper.
+_REPORTED_DEAD_ENDS = set()
+
+
+def _note_openalex_auth_failure(code):
+    """Record an OpenAlex 401/403: say it once, then stop asking."""
+    global _ANNOUNCED_AUTH_FAILURE
+    _trip_openalex_breaker(_AUTH_BREAKER_SECONDS)
+    if _ANNOUNCED_AUTH_FAILURE:
+        return
+    _ANNOUNCED_AUTH_FAILURE = True
+    have_key = bool(_OPENALEX_API_KEY)
+    print("[metrics] OpenAlex returned HTTP {} — {}. Paused for {:.0f} "
+          "min.".format(code,
+                        "the configured key was rejected" if have_key
+                        else "no API key is configured",
+                        _AUTH_BREAKER_SECONDS / 60.0))
+    if not have_key:
+        print("[metrics] " + _AUTH_MESSAGE)
+
+
+def openalex_blocked_reason():
+    """Why OpenAlex calls are being refused, as a sentence fit for the
+    UI — or None when they are not.
+
+    One place to ask, because the breaker has two hands and they need
+    opposite advice: a 429 clears itself at midnight UTC and the user
+    need only wait, while a 401 clears only when they paste a key.
+    Telling someone to wait for a reset that will never help them is
+    worse than saying nothing."""
+    if _openalex_paused_until <= time.monotonic():
+        return None
+    if _ANNOUNCED_AUTH_FAILURE:
+        return _AUTH_MESSAGE
+    return "OpenAlex daily quota exhausted. Resumes at 00:00 UTC."
+
+
+def openalex_auth_failed():
+    """True when an OpenAlex request has been rejected for want of a
+    key this session. The UI uses this to say so once, rather than
+    letting every empty result look like missing data."""
+    return _ANNOUNCED_AUTH_FAILURE
+
+
+def _note_dead_end(url, code):
+    """One line per (host, status), for a failure that is neither
+    retryable nor an ordinary 404."""
+    host = "OpenAlex" if _is_openalex_url(url) else "CrossRef"
+    if (host, code) in _REPORTED_DEAD_ENDS:
+        return
+    _REPORTED_DEAD_ENDS.add((host, code))
+    print("[metrics] {} returned HTTP {} — giving up on this request "
+          "(further {} {}s this session will be silent)".format(
+              host, code, host, code))
 
 
 def _trip_openalex_breaker(seconds):
@@ -253,13 +331,38 @@ def _is_openalex_url(url):
     return "openalex.org" in (url or "")
 
 
+def _announce_unauthenticated():
+    """Say once, on the first unauthenticated OpenAlex request, which
+    pool we are in.
+
+    Both of these are survivable and neither is an error, which is
+    exactly why they need saying: with no key we are on the common
+    quota, and with no contact address we are outside OpenAlex's
+    polite pool. The visible consequence is 429s and slow enrichment
+    on a bulk import, which otherwise looks like "the data isn't
+    there"."""
+    global _ANNOUNCED_UNAUTHENTICATED
+    if _ANNOUNCED_UNAUTHENTICATED:
+        return
+    _ANNOUNCED_UNAUTHENTICATED = True
+    print("[metrics] no OpenAlex API key — using the common quota "
+          "(set one in Preferences for a private budget)")
+    if not OPENALEX_MAILTO:
+        print("[metrics] no contact_email configured — requests are "
+              "outside OpenAlex's polite pool, so rate limits bite "
+              "sooner")
+
+
 def _apply_openalex_key(url):
     """Append the OpenAlex `api_key` query param to an OpenAlex URL when
     a key is configured. No-op for non-OpenAlex URLs, when no key is set,
     or when the URL already carries one. Centralised here so every
     OpenAlex request is authenticated without threading the key through
     each URL builder."""
-    if not _OPENALEX_API_KEY or not _is_openalex_url(url):
+    if not _is_openalex_url(url):
+        return url
+    if not _OPENALEX_API_KEY:
+        _announce_unauthenticated()
         return url
     if "api_key=" in url:
         return url
@@ -271,12 +374,30 @@ def _is_crossref_url(url):
     return "api.crossref.org" in (url or "")
 
 
-class OpenAlexQuotaExhausted(Exception):
+class OpenAlexUnavailable(Exception):
+    """OpenAlex will not serve us right now, for a reason worth telling
+    the user about. Catch this to cover both subclasses; catch one of
+    them to tell quota from authentication."""
+
+
+class OpenAlexQuotaExhausted(OpenAlexUnavailable):
     """Raised by `_http_get_json` when a persistent HTTP 429 with a
     long Retry-After indicates the daily quota is exhausted, and the
     caller asked to be told (raise_on_quota=True). Interactive code
     paths use this to show a clear status message instead of an
     empty-results page."""
+
+
+class OpenAlexAuthRequired(OpenAlexUnavailable):
+    """Raised on an OpenAlex 401/403 — the request was rejected for
+    want of a (valid) API key.
+
+    This is a separate exception from quota exhaustion because the
+    remedy is different and only the user can apply it. Before it
+    existed, a 401 was a non-retryable HTTPError like any other and
+    returned `None`, which is the same value callers get for "OpenAlex
+    has no record of this DOI" — so an unauthenticated app would have
+    reported every paper in the world as unknown, silently."""
 
 
 def _http_get_json(url, headers, timeout, raise_on_quota=False):
@@ -301,6 +422,10 @@ def _http_get_json(url, headers, timeout, raise_on_quota=False):
     # Circuit-breaker gate: bail before opening a socket.
     if _is_openalex_url(url) and _openalex_paused_until > time.monotonic():
         if raise_on_quota:
+            # The breaker is shared, so say which hand tripped it —
+            # "try again later" is wrong advice for a missing key.
+            if _ANNOUNCED_AUTH_FAILURE:
+                raise OpenAlexAuthRequired(_AUTH_MESSAGE)
             raise OpenAlexQuotaExhausted(
                 "OpenAlex daily quota exhausted "
                 "(HTTP 429 — try again later)")
@@ -330,12 +455,30 @@ def _http_get_json(url, headers, timeout, raise_on_quota=False):
                 _note_openalex_credits(e.headers)
             if is_cr_url and e.headers is not None:
                 _note_crossref_rate(e.headers)
+            # Authentication is not a transient failure and not an
+            # absence of data: retrying cannot help, and returning the
+            # `None` that means "no such work" would hide it entirely.
+            # Trip the breaker so the rest of the session stops asking
+            # — `set_openalex_api_key` clears it the moment a key
+            # arrives, so pasting one into Preferences takes effect
+            # without a restart.
+            if is_oa_url and e.code in (401, 403):
+                _note_openalex_auth_failure(e.code)
+                if raise_on_quota:
+                    raise OpenAlexAuthRequired(_AUTH_MESSAGE)
+                return None
             retry_ok = e.code == 429 or 500 <= e.code < 600
             if not retry_ok or attempt >= _HTTP_MAX_RETRIES:
                 if e.code == 429 and raise_on_quota:
                     raise OpenAlexQuotaExhausted(
                         "OpenAlex daily quota exhausted "
                         "(HTTP 429 — try again later)")
+                # A 404 is ordinary — plenty of DOIs are unknown to
+                # OpenAlex — but any other dead end is worth one line,
+                # or the caller's `None` is indistinguishable from
+                # "no data" in the terminal too.
+                if (is_oa_url or is_cr_url) and e.code != 404:
+                    _note_dead_end(url, e.code)
                 return None
             if e.code == 429:
                 ra = e.headers.get("Retry-After") if e.headers else None

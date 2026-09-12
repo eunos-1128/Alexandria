@@ -1420,14 +1420,15 @@ class AuthorPage(Gtk.Box):
         return False
 
     def _empty_status_markup(self):
-        """Pick the right "nothing to show" message. When the
-        OpenAlex session breaker is tripped, the empty result is
-        a rate-limit symptom, not "the author really has no
-        works" — say so explicitly."""
-        if metrics.openalex_paused_until() > 0:
-            return ("<span foreground='#cc6633'>Search blocked by "
-                    "OpenAlex — daily quota exhausted. Resumes at "
-                    "00:00 UTC.</span>")
+        """Pick the right "nothing to show" message. When OpenAlex is
+        refusing us, the empty result is a symptom of that rather than
+        "the author really has no works" — and `openalex_blocked_reason`
+        knows whether the remedy is waiting (quota) or pasting a key
+        (no authentication), which are not interchangeable."""
+        reason = metrics.openalex_blocked_reason()
+        if reason:
+            return ("<span foreground='#cc6633'>Search blocked — "
+                    "{}</span>".format(safe_pango_markup(reason)))
         return "<span alpha='75%'>No works found.</span>"
 
     def _works_status_markup(self, n):
@@ -1442,10 +1443,11 @@ class AuthorPage(Gtk.Box):
         # works is []. Surface the rate-limit reason rather than
         # leaving the "Loading…" line stuck and saying "No works
         # found" on the empty body.
-        if not profile and not works and metrics.openalex_paused_until() > 0:
+        reason = metrics.openalex_blocked_reason()
+        if not profile and not works and reason:
             blocked = ("<span size='small' foreground='#cc6633'>"
-                       "Search blocked by OpenAlex — daily quota "
-                       "exhausted. Resumes at 00:00 UTC.</span>")
+                       "Search blocked — {}</span>".format(
+                           safe_pango_markup(reason)))
             self.stats_lbl.set_markup(blocked)
             self.status.set_markup(blocked)
             return
