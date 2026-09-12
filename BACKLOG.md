@@ -872,21 +872,23 @@ Pending features, roughly grouped. Newest at the top of each section.
   surname rather than the stored string, or "Airlie J. McCoy" files
   under A.
 
-  **First publication is not free, and cannot be derived from what
-  we cache.** `fetch_author_profile` returns `counts_by_year`, but
-  OpenAlex caps that at roughly ten years — it would date Garib
-  Murshudov's first paper to 2016. `author_works_cache` holds one
-  page of works sorted by recency or citations, so the earliest is
-  not reliably in it either.
+  **First publication is free as well** — `counts_by_year` from
+  `fetch_author_profile` already carries it, and the author page
+  already fetches it to draw the sparkline. Measured on Garib
+  Murshudov: 36 entries, 1989 to 2026, which is what the sparkline
+  shows. So `counts_by_year[0]["year"]` is the answer, with no
+  extra request and no new column.
 
-  The clean answer is one extra request per author:
+  (An earlier draft of this entry said the opposite, on the
+  strength of a docstring claiming OpenAlex caps `counts_by_year`
+  at ten years. The docstring is stale, and the test that seemed to
+  confirm it had been run against an invented OpenAlex ID — a
+  different person's 36-year career reduced to 23 years. Read the
+  ID off the trail row.)
 
-      works?filter=author.id:<id>&sort=publication_date:asc&per-page=1
-
-  which returns exactly the first paper. Cache it as a column on
-  `author_trail` — it is a fact that only becomes wrong once, in
-  the unlikely event a career gains an earlier paper — and fetch it
-  lazily as authors are added, not in a sweep.
+  Worth caching on the trail row all the same, so sorting does not
+  wait on a profile fetch per author: the value only changes if a
+  career gains an earlier paper.
 
   **Where the control goes.** The works list in the author page
   already has a segmented Most recent / Most cited control; the
