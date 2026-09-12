@@ -679,10 +679,29 @@ class AuthorPage(Gtk.Box):
         self.append(sort_row)
 
         # --- Status + results list ------------------------------------
+        # The status line and, beside it, a small bar that pulses
+        # while OpenAlex is being waited on.
+        #
+        # Pulsing rather than filling, because there is no honest
+        # fraction to show. Measured on a prolific author: 2.07s
+        # across three requests, of which roughly a third is bytes
+        # arriving and the rest is waiting for a reply. A bar that
+        # tracked bytes would sit at zero for most of the wait and
+        # then jump — which is exactly the "is it stalled?" question
+        # it was meant to answer.
+        status_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
+                             spacing=8)
         self.status = Gtk.Label(xalign=0.0)
         self.status.set_markup(
             "<span alpha='75%'>Loading from OpenAlex…</span>")
-        self.append(self.status)
+        status_row.append(self.status)
+        self.load_bar = Gtk.ProgressBar()
+        self.load_bar.set_size_request(90, -1)
+        self.load_bar.set_valign(Gtk.Align.CENTER)
+        self.load_bar.set_visible(False)
+        status_row.append(self.load_bar)
+        self.append(status_row)
+        self._load_pulse_id = None
 
         self.list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
                                 spacing=10)
@@ -697,9 +716,52 @@ class AuthorPage(Gtk.Box):
 
     # --- Fetch ---------------------------------------------------------
 
+    def _start_load_pulse(self):
+        """Show the activity bar. Idempotent: several fetches can be
+        in flight (works, impact, citers) and the last to finish
+        stops it."""
+        if getattr(self, "load_bar", None) is None:
+            return
+        self.load_bar.set_visible(True)
+        if self._load_pulse_id is None:
+            # 120ms: fast enough to read as motion, slow enough that
+            # it is not a strobe.
+            self._load_pulse_ticks = 0
+            self._load_pulse_id = GLib.timeout_add(
+                120, self._pulse_load_bar)
+
+    # 120ms x 500 = a minute. A fetch that has not returned by then
+    # is not going to, and a timer that pulses forever would keep the
+    # page alive with it.
+    _MAX_PULSE_TICKS = 500
+
+    def _pulse_load_bar(self):
+        if getattr(self, "load_bar", None) is None:
+            self._load_pulse_id = None
+            return False
+        self._load_pulse_ticks = getattr(self, "_load_pulse_ticks", 0) + 1
+        if self._load_pulse_ticks > self._MAX_PULSE_TICKS:
+            self._load_pulse_id = None
+            self.load_bar.set_visible(False)
+            return False
+        self.load_bar.pulse()
+        return True
+
+    def _stop_load_pulse(self):
+        if self._load_pulse_id is not None:
+            try:
+                GLib.source_remove(self._load_pulse_id)
+            except Exception:
+                pass
+            self._load_pulse_id = None
+        if getattr(self, "load_bar", None) is not None:
+            self.load_bar.set_visible(False)
+        return False
+
     def _spawn_fetch(self):
         orcid = self.authorship.get("orcid")
         oa_id = self.authorship.get("openalex_id")
+        self._start_load_pulse()
         # Local and cheap, so it fills before the network sections
         # rather than after them.
         self._fill_funding()
@@ -721,11 +783,39 @@ class AuthorPage(Gtk.Box):
         self._start_citers_load()
 
     def _do_fetch(self, orcid, oa_id):
-        profile = metrics.fetch_author_profile(orcid=orcid, openalex_id=oa_id)
-        works = self._cached_or_fetch_works(orcid, oa_id, self._works_sort)
-        coauths = metrics.fetch_coauthors(
-            orcid=orcid, openalex_id=oa_id, limit=12)
-        GLib.idle_add(self._apply_results, profile, works, coauths)
+        """Profile, works and collaborators — three independent
+        requests, so run them together.
+
+        Measured on a prolific author: 2.07s one after another
+        (0.20 + 0.97 + 0.90), 1.41s side by side. The page cannot
+        render until all three are in, so the sequence was costing
+        two thirds of a second for nothing."""
+        out = {}
+
+        def call(key, fn):
+            try:
+                out[key] = fn()
+            except Exception as e:
+                print("author fetch ({}): {}".format(key, e))
+                out[key] = None
+
+        threads = [
+            threading.Thread(target=call, args=("profile", lambda:
+                metrics.fetch_author_profile(
+                    orcid=orcid, openalex_id=oa_id)), daemon=True),
+            threading.Thread(target=call, args=("works", lambda:
+                self._cached_or_fetch_works(
+                    orcid, oa_id, self._works_sort)), daemon=True),
+            threading.Thread(target=call, args=("coauths", lambda:
+                metrics.fetch_coauthors(
+                    orcid=orcid, openalex_id=oa_id, limit=12)), daemon=True),
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        GLib.idle_add(self._apply_results, out.get("profile"),
+                      out.get("works"), out.get("coauths"))
 
     def _cached_or_fetch_works(self, orcid, oa_id, sort_key):
         """Try the works-list cache first; on hit and fresh, return
@@ -1239,6 +1329,8 @@ class AuthorPage(Gtk.Box):
         return "<span alpha='75%'>{} {} works</span>".format(n, sort_label)
 
     def _apply_results(self, profile, works, coauths=None):
+        # Whatever the outcome, the waiting is over.
+        self._stop_load_pulse()
         # OpenAlex circuit breaker tripped → profile is None and
         # works is []. Surface the rate-limit reason rather than
         # leaving the "Loading…" line stuck and saying "No works
