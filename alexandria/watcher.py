@@ -228,9 +228,52 @@ class LibraryWatcher:
             # adopts the existing index row.
             if _is_pdf(other):
                 self._spawn(self._do_import, other)
+            elif _is_sidecar(other):
+                # An atomic sidecar write (`sidecar.write` is tmp +
+                # os.replace, which surfaces as RENAMED). This used to
+                # be ignored on the assumption that any such write was
+                # this process's own, and the GUI had already redrawn.
+                #
+                # That stopped being true once a second Alexandria
+                # process could write: the MCP server's `set_summary`
+                # writes the sidecar *and* upserts the index, so the
+                # database is correct and only the open window is
+                # stale. The summary would not appear on the card
+                # until a restart.
+                self._spawn(self._do_sidecar_refresh, other)
             elif _is_pdf(path):
                 # Renamed to non-PDF (e.g. ".pdf.bak") — drop it.
                 self._spawn(self._do_delete, path)
+
+    def _do_sidecar_refresh(self, sc_path):
+        """Tell the GUI to re-read a sidecar that another writer
+        replaced.
+
+        Deliberately does not touch the index: whoever wrote the file
+        updated the row, and re-reading it here would race them. The
+        only thing missing is that the open window does not know.
+
+        Unknown sidecars are ignored rather than imported — a file
+        that matches no paper is the emailed-sidecar case, which
+        `_on_foreign_sidecar` handles."""
+        if self._is_suppressed(sc_path):
+            return
+        try:
+            conn = index.connect_existing(self.db_path)
+        except Exception:
+            return
+        try:
+            known = conn.execute(
+                "SELECT 1 FROM papers WHERE sidecar_path = ?",
+                (sc_path,)).fetchone() is not None
+        except Exception:
+            known = False
+        finally:
+            conn.close()
+        if known and self.on_change:
+            print("[watcher] sidecar rewritten elsewhere; reloading: {}"
+                  .format(os.path.basename(sc_path)))
+            GLib.idle_add(self.on_change, "sidecar-refresh")
 
     def _spawn(self, fn, *args):
         threading.Thread(target=fn, args=args, daemon=True).start()
