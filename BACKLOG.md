@@ -854,6 +854,44 @@ Pending features, roughly grouped. Newest at the top of each section.
 
 - Page thumbnails sidebar.
 
+- **Do not jump to the reference at all — the popover already has
+  it.** Proposed 2026-09-10: if the reference text is in the
+  popover, there is nothing to jump to and nothing to come back
+  from.
+
+  **Stronger than it first appears: the text is already there.**
+  `_show_reference_popover` sets `entry_lbl.set_text(entry["text"])`
+  (`viewer.py:1959`) — the full reference, selectable, above the
+  resolved metadata and the Add-to-library buttons. So today we
+  *both* move the reader to the bibliography *and* show them the
+  entry they were moved to. The jump is the redundant half.
+
+  This is a deletion, not a feature. It also retires the whole
+  return trip: `_push_jump_origin`, the jump stack, "Back to text",
+  and the `<Alt>Left` / `<Meta>bracketleft` bindings exist to undo
+  a move that would no longer happen.
+
+  **What the jump is still good for**, and why it should survive as
+  a secondary action rather than vanish:
+    - it is the proof the resolution was right — landing on the
+      entry is more convincing than being told about it;
+    - readers browse *around* a reference, seeing what else that
+      paper cites nearby;
+    - when the bibliography could not be parsed there is no text to
+      show, and the jump is all we have.
+
+  **Suggested rule: jump only when we cannot show the text.** The
+  popover stays put and fills itself in when `entry["text"]` is
+  there; when the entry is unparsed, fall back to today's behaviour
+  of moving to the position the link points at. That turns the jump
+  from the default into the fallback, which is the right way round —
+  and it needs no preference.
+
+  Keep the toolbar anchoring either way. The popover hangs off
+  `ref_btn` rather than the page because anchoring to the scrolling
+  widget was dismissing it about a second after opening; with no
+  jump, there is even less reason to anchor to a moving target.
+
 - **Ruler mode: highlight the line you are reading.** Asked for
   2026-09-10, from sioyek, which dims the page and keeps one line
   lit, advanced by key. It helps with dense text, and with
