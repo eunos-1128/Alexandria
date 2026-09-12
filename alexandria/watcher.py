@@ -158,15 +158,33 @@ class LibraryWatcher:
         self._reconcile_thread.start()
 
     def _do_reconcile(self):
+        """Catch up on anything that changed while we were not
+        watching — and, since the ghost-merge dispatch moved into
+        `importer`, rescue PDFs whose live event was dropped.
+
+        Counts what it did. Silence here used to be ambiguous: a
+        startup that found nothing and a startup that found a
+        problem and did nothing about it looked identical, which is
+        precisely how the orphaned-PDF bug stayed hidden."""
         conn = index.connect_existing(self.db_path)
+        tally = {}
+
+        def count(_i, _n, _path, _rec, status):
+            tally[status] = tally.get(status, 0) + 1
+
         try:
             importer.import_tree(
-                conn, self.root, skip_roots=self.skip_roots)
+                conn, self.root, on_progress=count,
+                skip_roots=self.skip_roots)
         except Exception as e:
             print("LibraryWatcher: reconcile failed:", e)
             return
         finally:
             conn.close()
+        if tally:
+            print("[watcher] reconcile: {}".format(
+                ", ".join("{} {}".format(n, status)
+                          for status, n in sorted(tally.items()))))
         if self.on_change:
             GLib.idle_add(self.on_change, "reconcile")
 
@@ -229,63 +247,25 @@ class LibraryWatcher:
 
     def _do_import_with_conn(self, conn, path):
         try:
-            rec, status = importer.import_pdf(conn, path)
+            # The ghost-merge dispatch lives in importer now, so a
+            # reconcile pass gets it too: this branch used to be the
+            # only place it happened, and a PDF whose filesystem
+            # event was dropped could never be attached afterwards.
+            rec, status, new_path = importer.import_pdf_or_attach(
+                conn, path, self.root, suppress=self._suppress_path)
         except Exception as e:
             print("[watcher] import failed for {}: {}".format(path, e))
             return
 
-        # Ghost-merge: the dropped PDF's DOI matched a BibTeX-only stub.
-        # Route through attach_pdf_to_ghost so the ghost's curation is
-        # merged onto the new sidecar and the ghost row is removed.
-        if (status == "duplicate" and rec
-                and sidecar.is_ghost_path(rec.get("pdf_path") or "")):
-            print("[watcher] duplicate is a ghost ({}); attaching"
-                  .format(rec.get("pdf_path")))
-            # Predict the path attach_pdf_to_ghost will copy to and
-            # suppress watcher events on it for the duration. Without
-            # this the create/changed events on the new file race with
-            # attach's own import_pdf call, which then sees its own
-            # output as a duplicate and rolls back the copy.
-            ghost_pdf = rec.get("pdf_path") or ""
-            ghost_key = (ghost_pdf[len(sidecar.GHOST_PATH_PREFIX):]
-                         if ghost_pdf.startswith(sidecar.GHOST_PATH_PREFIX)
-                         else "")
-            try:
-                predicted = bibtex_import._unique_target_path(
-                    self.root, ghost_key) if ghost_key else None
-            except Exception:
-                predicted = None
-            if predicted:
-                self._suppress_path(predicted, 30)
-                print("[watcher] suppressing events on {} for 30s"
-                      .format(predicted))
-            try:
-                new_path, gstatus, gmsg = bibtex_import.attach_pdf_to_ghost(
-                    conn, dict(rec), path, self.root)
-            except Exception as e:
-                print("[watcher] ghost-merge failed for {}: {}".format(path, e))
-                return
-            if new_path:
-                # Lift suppression early on success so legitimate
-                # follow-up edits aren't dropped.
-                with self._suppress_lock:
-                    self._suppress.pop(os.path.abspath(new_path), None)
+        if new_path:
+            # Lift suppression early on success so legitimate
+            # follow-up edits aren't dropped.
+            with self._suppress_lock:
+                self._suppress.pop(os.path.abspath(new_path), None)
             print("[watcher] ghost-merge: {} -> {} ({})".format(
-                path, gstatus, gmsg))
-            # attach_pdf_to_ghost copies source → <bibtex_key>.pdf. If
-            # source was already in the library root, drop it so we
-            # don't leave two copies of the same PDF on disk.
-            if (gstatus == "merged" and new_path
-                    and os.path.abspath(new_path) != os.path.abspath(path)
-                    and os.path.isfile(path)):
-                try:
-                    os.remove(path)
-                    print("[watcher] removed duplicate source: {}".format(path))
-                except OSError as e:
-                    print("[watcher] could not remove source {}: {}"
-                          .format(path, e))
+                path, status, new_path))
             if self.on_change:
-                GLib.idle_add(self.on_change, gstatus)
+                GLib.idle_add(self.on_change, status)
             return
 
         if status == "duplicate" and rec:

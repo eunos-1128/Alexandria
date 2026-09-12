@@ -1015,6 +1015,69 @@ def rename_pdf(conn, old_path, new_path):
     index.remove(conn, old_path)
 
 
+def import_pdf_or_attach(conn, path, library_root, suppress=None):
+    """`import_pdf`, plus: a duplicate that turns out to be a BibTeX
+    ghost is attached to it rather than left on the floor.
+
+    Returns `(rec, status, new_path)` — `new_path` is the file the
+    merge produced, or None when no merge happened.
+
+    **This dispatch used to live only in the watcher**, which is how
+    a PDF could be orphaned permanently. If the watcher missed the
+    filesystem event — kqueue drops them under load — nothing else
+    ever attached the file: `import_tree`, which `reconcile_startup`
+    runs, called `import_pdf`, recorded "duplicate" and moved on. So
+    every restart re-reported the same duplicate and changed
+    nothing, and the PDF sat beside its own ghost for good.
+
+    `suppress(path, seconds)` silences a file watcher on the path
+    the merge is about to create. Without it the create event races
+    `attach_pdf_to_ghost`'s own import, which then sees its own
+    output as a duplicate and rolls the copy back. The watcher passes
+    its own; a reconcile pass has nothing to suppress and passes
+    None."""
+    # Imported here, not at module scope: bibtex_import calls
+    # import_pdf, so the two would import each other.
+    from . import bibtex_import
+
+    rec, status = import_pdf(conn, path)
+    if not (status == "duplicate" and rec
+            and sidecar.is_ghost_path(rec.get("pdf_path") or "")):
+        return rec, status, None
+
+    ghost_pdf = rec.get("pdf_path") or ""
+    if suppress is not None:
+        prefix = sidecar.GHOST_PATH_PREFIX
+        key = (ghost_pdf[len(prefix):]
+               if ghost_pdf.startswith(prefix) else "")
+        try:
+            predicted = (bibtex_import._unique_target_path(library_root, key)
+                         if key else None)
+        except Exception:
+            predicted = None
+        if predicted:
+            suppress(predicted, 30)
+
+    try:
+        new_path, gstatus, gmsg = bibtex_import.attach_pdf_to_ghost(
+            conn, dict(rec), path, library_root)
+    except Exception as e:
+        print("ghost-merge failed for {}: {}".format(path, e))
+        return rec, status, None
+
+    # attach copies source → <bibtex_key>.pdf. When the source was
+    # already inside the library there would otherwise be two copies
+    # of one paper on disk.
+    if (gstatus == "merged" and new_path
+            and os.path.abspath(new_path) != os.path.abspath(path)
+            and os.path.isfile(path)):
+        try:
+            os.remove(path)
+        except OSError as e:
+            print("could not remove merged source {}: {}".format(path, e))
+    return rec, gstatus, new_path
+
+
 def import_tree(conn, root, on_progress=None, refresh=False,
                 skip_roots=None):
     """Import every PDF under root. With refresh=True, sidecars without
@@ -1032,7 +1095,7 @@ def import_tree(conn, root, on_progress=None, refresh=False,
                 if status == "no_sidecar":
                     rec, status = import_pdf(conn, p)
             else:
-                rec, status = import_pdf(conn, p)
+                rec, status, _new = import_pdf_or_attach(conn, p, root)
         except Exception as e:
             print("import failed for {}: {}".format(p, e))
         if on_progress:
