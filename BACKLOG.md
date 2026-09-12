@@ -854,6 +854,41 @@ Pending features, roughly grouped. Newest at the top of each section.
 
 - Page thumbnails sidebar.
 
+- **Follow the blue DOI links in a reference list.** Asked for
+  2026-09-10. Publishers set the DOI at the end of a reference as a
+  hyperlink; clicking it in Alexandria does nothing at all.
+
+  **Measured, since the request came with "they are not ubiquitous
+  IIRC" — correct, and more common than that suggests.** Of the 216
+  PDFs in the reference library, **107 (50%) carry DOI links on
+  their last four pages**. Counts vary wildly by publisher: two or
+  three links in an Elsevier paper that only links a few
+  references, 51 and 20 in BMC/Chemistry Central papers, and 215 in
+  `1-s2.0-S1043661825003433-main.pdf`, which links every entry.
+  That last one is the example to develop against.
+
+  **The viewer currently ignores URI annotations entirely.**
+  `pdf_links.read_citation_links` keeps only `GOTO_DEST` links —
+  internal jumps it can tie to a bibliography entry — and no code
+  anywhere handles `ActionType.URI`. So this is not a matter of
+  changing behaviour but of adding it.
+
+  **What clicking should do, and it is not "open a browser".** We
+  already resolve a DOI to a reference popover with the paper's
+  metadata, an Add-to-library button and a Get-PDF path; a DOI
+  hyperlink in a reference list is the same thing arriving by an
+  easier route. Opening `doi.org` in Firefox throws away everything
+  the app is for. Offer the browser as the secondary action.
+
+  **Why this is the cheapest of the three navigation entries.** No
+  text matching, no anchor heuristics, no JATS: the publisher has
+  put the DOI in the annotation, exactly and machine-readably. Half
+  the library gets a working click for the price of reading a field
+  we already fetch and currently discard.
+
+  Cheap enough to do before the sioyek-style target indexing, and
+  independent of it.
+
 - **Review sioyek and Hammer PDF.** Asked for 2026-09-10. Two
   existing readers aimed at exactly our reader — someone working
   through scientific papers — and both have shipped features we are
