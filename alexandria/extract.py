@@ -588,9 +588,13 @@ def _scrape_doi(text):
     # stitch them — dropping the newline and any alignment whitespace —
     # before matching. Without this, `pdftotext -layout` text yields a
     # DOI truncated at the wrap ("10.1146/annurev-biophys-111622-").
+    # The continuation must contain a digit before the next space.
+    # A wrapped DOI does ("103134"); the first word of an adjacent
+    # column usually does not ("Microbial"), and gluing that on
+    # yields a DOI-shaped string that resolves nowhere.
     text = re.sub(
         r"(10\.\d{4,9}/[-._;()/:A-Z0-9]*-)[ \t]*\r?\n[ \t]*"
-        r"(?=[-._;()/:A-Z0-9])",
+        r"(?=[-._;()/:A-Z0-9]*\d)",
         r"\1", text, flags=re.IGNORECASE)
     matches = re.findall(
         r"(?:doi(?:\.org)?[:/]\s*)?(10\.\d{4,9}/[-._;()/:A-Z0-9]+)",
@@ -600,6 +604,12 @@ def _scrape_doi(text):
     seen = []
     for raw in matches:
         d = raw.rstrip(".,;)]\"'").split()[0]
+        if d.endswith("-"):
+            # Truncated at a line wrap whose continuation we could not
+            # identify. A DOI never ends in a hyphen, and half a DOI
+            # is worse than none: it would stop the caller looking
+            # anywhere else.
+            continue
         if d and d not in seen:
             seen.append(d)
     if not seen:
@@ -982,7 +992,14 @@ def _enrich(result, pdf_path):
             if doi:
                 result["doi"] = doi
     elif not result.get("doi"):
-        doi = _scrape_doi(text)
+        # Raw scan first. `text` above comes from `-layout`, which
+        # sets the neighbouring column on the same visual line — so a
+        # DOI that wraps at one of its own hyphens gets stitched to
+        # whatever word sits beside it ("…-070924-Microbial"), and a
+        # confidently wrong DOI stops every later step from running.
+        doi = _scan_doi_in_pages(pdf_path, max_pages=2)
+        if not doi:
+            doi = _scrape_doi(text)
         if not doi:
             # Filename-based inference: free and instant for the
             # common publisher conventions (PNAS / bioRxiv /
