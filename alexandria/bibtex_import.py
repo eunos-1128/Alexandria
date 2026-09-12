@@ -268,6 +268,22 @@ def _normalised_doi(doi):
     return index.normalize_doi(doi).lower() if index.normalize_doi(doi) else ""
 
 
+def _hyphen_variant(a, b):
+    """True when two DOIs differ only in hyphenation.
+
+    Publishers misprint their own DOI. Annual Reviews renders
+    `10.1146/annurev-biophys-052118-115647` into the PDF's front
+    matter as `…-052118115647`, hyphen absent from the text stream —
+    so scraping the file gives a DOI that is *wrong* while the BibTeX
+    entry, which came from CrossRef, is right. Comparing them
+    verbatim rejects a perfectly correct PDF.
+
+    Hyphens are the only punctuation treated this loosely, and only
+    when everything else matches: two real DOIs that differ solely by
+    a hyphen are not a thing anyone has produced."""
+    return bool(a) and bool(b) and a.replace("-", "") == b.replace("-", "")
+
+
 def _ghost_doi_check(ghost_doi, src_pdf_path):
     """Compare the ghost's DOI to whatever DOI we can scrape out of
     the source PDF. Returns (ok, message). If both have a DOI and
@@ -283,6 +299,8 @@ def _ghost_doi_check(ghost_doi, src_pdf_path):
     if not s:
         return True, ""              # PDF has no DOI we can find.
     if g != s:
+        if _hyphen_variant(g, s):
+            return True, ""      # the publisher misprinted its own
         return False, ("PDF rejected: its DOI {} doesn't match the "
                        "BibTeX entry's {}".format(src_doi, ghost_doi))
     return True, ""
@@ -408,6 +426,15 @@ def attach_pdf_to_ghost(conn, ghost_row, source_pdf_path, library_root):
     # the ghost's. The DOI gate above already guaranteed there is no
     # conflict, and without this the merged entry loses the DOI and
     # with it citation refresh and enrichment.
+    if ghost_rec.get("doi") and _hyphen_variant(
+            _normalised_doi(ghost_rec.get("doi")),
+            _normalised_doi(cur.get("doi"))) and \
+            _normalised_doi(ghost_rec["doi"]) != _normalised_doi(
+                cur.get("doi")):
+        # Same DOI, differently hyphenated: the ghost's came from
+        # CrossRef and the record's was scraped off a page the
+        # publisher typeset wrong. Keep the one that resolves.
+        cur["doi"] = ghost_rec["doi"]
     if ghost_rec.get("doi") and not cur.get("doi"):
         cur["doi"] = ghost_rec["doi"]
         # The import above ran DOI-less, so it skipped OpenAlex
