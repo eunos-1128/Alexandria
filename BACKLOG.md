@@ -854,6 +854,42 @@ Pending features, roughly grouped. Newest at the top of each section.
 
 - Page thumbnails sidebar.
 
+- **Ruler mode: highlight the line you are reading.** Asked for
+  2026-09-10, from sioyek, which dims the page and keeps one line
+  lit, advanced by key. It helps with dense text, and with
+  two-column journal setting in particular, where the eye returning
+  to the left margin lands a line out.
+
+  Also an accessibility feature, not only a convenience: line
+  tracking is a standard aid for readers who lose their place, and
+  a physical ruler under the line is what people do on paper.
+
+  **We already have the data.** `references_pdf._page_lines` groups
+  `page.get_text_layout()` character rectangles into lines, and the
+  viewer already renders per-page `DrawingArea`s with a draw
+  function it can overlay. No new dependency, nothing to fetch, and
+  the highlight is a rectangle.
+
+  **The hard part is columns, and we have already been bitten by
+  it.** Grouping characters into lines by y-band alone merges the
+  two columns of a journal page — which is exactly how
+  `parse_bibliography` came to see `"REFERENCES14. Cawez, F., …"`
+  as one line on 2026-09-08, and why `_scan_doi_in_pages` cannot
+  use `pdftotext -layout`. A ruler built on the same grouping would
+  light up a strip across both columns, which is worse than no
+  ruler. Column detection has to come first — cluster line-start x
+  positions, as the text-selection heuristic already does — and it
+  is most of the work.
+
+  How sioyek does it (`~/Projects/sioyek/sioyek`): per-page line
+  rectangles cached on the document (`cached_page_line_rects`), a
+  line index moved by key, spilling to the next page at the end.
+  Same shape as ours would be.
+
+  Keys need care: the viewer already binds Page_Up/Down and the
+  arrows scroll. sioyek uses j/k. Whatever is chosen goes in the
+  shortcuts window, which now exists.
+
 - **Follow the blue DOI links in a reference list.** Asked for
   2026-09-10. Publishers set the DOI at the end of a reference as a
   hyperlink; clicking it in Alexandria does nothing at all.
