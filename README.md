@@ -151,9 +151,70 @@ icon, which do nothing on macOS but are harmless.
 
 ## Usage
 
-  Upon opening Alexandria, it will detect PDF files in
-  `$HOME/Documents/Alexandria` and try to create a thumbnail PNG and the
-  associated metadata (if they don't already exist).
+Upon opening Alexandria, it will detect PDF files in
+`$HOME/Documents/Alexandria` and try to create a thumbnail PNG and the
+associated metadata (if they don't already exist).
+
+### Getting papers in
+
+Drop a PDF into `$HOME/Documents/Alexandria` with a file manager, or
+drag it onto the Alexandria window — either way a card appears, with
+the metadata looked up from the DOI. There is no import dialog to go
+through. The hamburger menu also offers **Import from DOI or PubMed
+ID…**, **Import BibTeX…**, **Import Files…** and **Import Folder…**.
+
+A BibTeX import makes a card for every entry, including the ones with
+no PDF. Those are *ghost* cards: press **Get PDF** and Alexandria
+tries OpenAlex, Unpaywall and EuropePMC in turn, and on success merges
+the download into the entry. Dropping a PDF straight onto a ghost
+card's thumbnail does the same thing.
+
+### Reading
+
+Click a card's thumbnail to open the viewer. The sidebar has three
+modes — **Contents** (the PDF's own table of contents), **Pages**
+(thumbnails) and **Highlights** — and F9 toggles it.
+
+The part worth knowing about: **click a citation marker in the body
+text**. Alexandria resolves `[12]` against the paper's reference list
+and jumps there, showing the reference with its metadata and an
+option to add it to your library. This works from the publisher's own
+link annotations where they exist, and from the JATS full text or the
+printed reference list where they do not.
+
+Select text to highlight it and attach a comment; highlights are
+saved in the sidecar and listed in the sidebar.
+
+### Cards
+
+The chips along a card's title tell you about the paper at a glance:
+open-access status, licence, whether a correction or retraction has
+been registered, whether the full text or JATS is stored locally,
+whether it is supplementary material, and — for UK-funded work — the
+UKRI grant that paid for it. Hover any of them for the detail.
+
+A **Check metadata** chip means the DOI's record was used but it
+disagrees with what the PDF says about itself; **Unverified** means no
+DOI resolved to a paper record at all. Either way, open **Edit
+metadata** to see both and decide.
+
+### Authors
+
+Click the author list on a card for a popover of its authors, then a
+name to open the Author view: what they have published, who they
+publish with, who cites them most, their
+citing-impact split by whether the citing paper treats the work as
+software, method or idea — and, where they are UK-funded, the grants
+they hold as PI or Co-I with amounts and dates, from UKRI Gateway to
+Research.
+
+Authors you have looked at accumulate in a trail down the left, and
+they are shared across catalogues, as are any photographs you attach.
+
+### Keeping up
+
+**Subscriptions** follow a journal or a saved OpenAlex search and
+collect what is new into a feed.
 
 ## Notes
 - [1] poppler `https://poppler.freedesktop.org/`
