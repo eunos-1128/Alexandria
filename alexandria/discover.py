@@ -23,7 +23,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, GObject, Gtk, Pango
 
-from . import author_works, metrics
+from . import author_works, europepmc, metrics
 
 
 def open_window(parent, conn):
@@ -68,6 +68,9 @@ class DiscoverWindow(Adw.Window):
         self.stack.add_titled_with_icon(
             self._build_pdb_page(), "pdb", "By PDB",
             "applications-science-symbolic")
+        self.stack.add_titled_with_icon(
+            self._build_preprint_page(), "preprint", "Preprints",
+            "document-open-recent-symbolic")
 
         switcher = Adw.ViewSwitcher()
         switcher.set_stack(self.stack)
@@ -631,6 +634,100 @@ class DiscoverWindow(Adw.Window):
     # =========================================================
     # Shared work-row (topic + title results)
     # =========================================================
+
+    # =========================================================
+    # Preprints (Europe PMC)
+    # =========================================================
+
+    def _build_preprint_page(self):
+        """Preprint search, which the other tabs cannot do: OpenAlex
+        is late on preprints and sometimes never indexes them, while
+        Europe PMC carries bioRxiv and medRxiv directly and needs no
+        key."""
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        box.set_margin_start(12)
+        box.set_margin_end(12)
+        box.set_margin_top(10)
+        box.set_margin_bottom(10)
+
+        controls = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self._p_query = Gtk.Entry()
+        self._p_query.set_placeholder_text(
+            'e.g. cryo-EM "model building" — quotes keep a phrase whole')
+        controls.append(_form_row("Abstract contains", self._p_query))
+
+        opts = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        opts.append(Gtk.Label(label="Server"))
+        sl = Gtk.StringList()
+        for label in ("Any", ) + europepmc.PUBLISHERS:
+            sl.append(label)
+        self._p_publisher = Gtk.DropDown(model=sl)
+        self._p_publisher.set_selected(1)      # bioRxiv
+        opts.append(self._p_publisher)
+        opts.append(Gtk.Label(label="  Posted since"))
+        self._p_since = Gtk.Entry()
+        self._p_since.set_max_length(10)
+        self._p_since.set_width_chars(11)
+        self._p_since.set_placeholder_text("YYYY-MM-DD")
+        opts.append(self._p_since)
+        controls.append(opts)
+
+        btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        self._p_search_btn = Gtk.Button(label="Search Europe PMC")
+        self._p_search_btn.add_css_class("suggested-action")
+        self._p_search_btn.connect("clicked", self._on_preprint_search)
+        btn_row.append(self._p_search_btn)
+        controls.append(btn_row)
+        self._p_query.connect("activate", self._on_preprint_search)
+        box.append(controls)
+
+        self._p_status = Gtk.Label(xalign=0.0)
+        box.append(self._p_status)
+
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_vexpand(True)
+        scrolled.set_hexpand(True)
+        self._p_results_box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        scrolled.set_child(self._p_results_box)
+        box.append(scrolled)
+        return box
+
+    def _on_preprint_search(self, _btn):
+        query = (self._p_query.get_text() or "").strip()
+        if not query:
+            self._p_status.set_text("Enter something to search for.")
+            return
+        idx = self._p_publisher.get_selected()
+        publisher = (None if idx == 0
+                     else europepmc.PUBLISHERS[idx - 1])
+        since = (self._p_since.get_text() or "").strip() or None
+
+        self._p_status.set_text("Searching Europe PMC…")
+        self._p_search_btn.set_sensitive(False)
+        self._clear_box(self._p_results_box)
+
+        def _do():
+            rows = europepmc.search_preprints(
+                query, publisher=publisher, since=since, limit=25)
+            GLib.idle_add(self._after_preprint_search, rows)
+
+        threading.Thread(target=_do, daemon=True).start()
+
+    def _after_preprint_search(self, rows):
+        self._p_search_btn.set_sensitive(True)
+        if not rows:
+            self._p_status.set_text(
+                "No preprints matched. Every term has to appear in the "
+                "abstract.")
+            return False
+        self._p_status.set_markup(
+            "<small>{} preprint{}, newest first</small>".format(
+                len(rows), "" if len(rows) == 1 else "s"))
+        existing = self.parent_window._existing_dois_set()
+        for r in rows:
+            self._p_results_box.append(self._build_work_row(r, existing))
+        return False
 
     def _build_work_row(self, r, existing_dois):
         """Reuse the parent window's `_build_related_row` for shape
