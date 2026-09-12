@@ -489,12 +489,25 @@ def _scan_doi_in_pages(pdf_path, max_pages=4):
     """Search for a DOI across the first `max_pages` of the PDF.
     Used as a fallback when the page-1 scrape doesn't find one — some
     journals (Science, PNAS, ...) put the DOI in a footer or near the
-    references rather than on page 1. Returns the first DOI found, or None."""
+    references rather than on page 1. Returns the first DOI found, or None.
+
+    `-raw`, and the choice matters. Annual Reviews wraps the DOI in
+    its narrow front-matter column, breaking at a hyphen. pdftotext's
+    *default* mode joins such a line and drops the hyphen, taking it
+    for word hyphenation, so the DOI extracts as
+    `10.1146/annurev-biophys-070924103134` — which resolves nowhere.
+    `-layout` keeps the hyphen but sets the neighbouring column on
+    the same visual line, so the stitch in `_scrape_doi` glues the
+    DOI to whatever word sits beside it
+    (`…-021424-Since`). `-raw` emits text in content-stream order, so
+    the continuation of a wrapped DOI is the next thing on the
+    stream, and `…-\n103134` stitches back to the real DOI."""
     if not shutil.which("pdftotext"):
         return None
     try:
         proc = subprocess.run(
-            ["pdftotext", "-f", "1", "-l", str(max_pages), pdf_path, "-"],
+            ["pdftotext", "-raw", "-f", "1", "-l", str(max_pages),
+             pdf_path, "-"],
             capture_output=True, text=True, timeout=30, errors="replace")
     except (OSError, subprocess.TimeoutExpired):
         return None

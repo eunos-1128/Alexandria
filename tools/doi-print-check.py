@@ -1,22 +1,23 @@
 #!/usr/bin/env python3
 """Find PDFs whose printed DOI disagrees with their own link target.
 
-A publisher's front matter carries the DOI twice: as text on the page,
-and as the URL behind that text. When they disagree, the file is
-internally inconsistent — and it is the *text* that every importer,
-reference manager, search index and crawler reads.
+A publisher's front matter carries the DOI twice: as text on the
+page, and as the URL behind that text. When they disagree, either the
+file is inconsistent or — far more likely, as it turned out here —
+our text extraction is at fault. Needing no reference DOI from
+outside the file is the point: each report is self-contained.
 
-Annual Reviews does this: `10.1146/annurev-biophys-052118-115647` is
-rendered with the last hyphen missing from the text stream, so the
-extracted DOI resolves nowhere while the link still works. That is
-why nobody notices.
-
-Needing no reference DOI from outside the file is the point: each
-report is self-contained evidence.
+Written 2026-09-08 believing Annual Reviews shipped a broken DOI in
+their text layer. They do not. Their DOIs wrap across a line at a
+hyphen, and `pdftotext` in its default mode joins such lines and
+drops the hyphen. This tool reported 7 of 7 files as mismatched;
+after `_scan_doi_in_pages` moved to `-raw`, it reports 0 of 7. That
+is what it is for now: a check that our own extraction agrees with
+what the publisher linked.
 
     tools/doi-print-check.py FILE.pdf [FILE.pdf ...]
     tools/doi-print-check.py ~/Documents/Alexandria      # a directory
-    tools/doi-print-check.py --all ~/Desktop             # list every file
+    tools/doi-print-check.py --all ~/Desktop            # list every file
 """
 
 import os
