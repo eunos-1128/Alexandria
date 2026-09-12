@@ -1122,43 +1122,11 @@ Pending features, roughly grouped. Newest at the top of each section.
   Worth noting the trail is now shared across catalogues, so this
   is one setting, not one per catalogue.
 
-- **Condensed view for reference lists, expanding on click.**
+- **Condensed view for reference cards, expanding on click.**
   Asked for 2026-09-10. Each reference row shows title, authors,
   journal and year — which is what it shows now — but tightly, with
   the vertical space cut and **no PDF icon**. Clicking a row expands
-  it into the full row we render today.
-
-  **The list is long enough for this to matter.** Sampled 23 papers
-  with a parsable bibliography: median **51** references, longest
-  **193**. At today's row spacing that is a popover you scroll for a
-  while, and the thing being scrolled past is mostly whitespace and
-  buttons.
-
-  Where the space goes now (`_build_pdf_ref_row`,
-  `browse.py:5028`): 6px top and bottom margin per row, 8px at each
-  side, 8px between the number and the text, a 4px-spaced vertical
-  box on the right holding an in-library label, an in-library
-  button and a DOI button. The text label wraps at word-char, so a
-  long reference is three or four lines. The per-row furniture, not
-  the reference, is what costs the height.
-
-  **Expansion, not a separate mode**, is the part worth keeping:
-  the reader scans a dense list, then opens the one they care
-  about and gets everything — the buttons, the in-library state,
-  the DOI action — without leaving the list or losing their place.
-  A `Gtk.Expander` per row, or a revealer, keeps one implementation
-  rather than two divergent row builders.
-
-  Open questions for when this is built:
-    - does the condensed row keep the reference number? It is the
-      cheapest column and the one a reader matches against `[41]`
-      in the text, so probably yes;
-    - does an expanded row collapse when another is opened, or do
-      several stay open? Accordion behaviour is tidier and one
-      more thing to be annoyed by;
-    - the in-library state is the one signal worth keeping visible
-      while condensed, since it is the reason to scan the list at
-      all — but as a mark rather than a button.
+  it into the full card that we render today.
 
 - **Do not jump to the reference at all — the popover already has
   it.** Proposed 2026-09-10: if the reference text is in the
@@ -2954,9 +2922,29 @@ in the library, so the app already has somewhere better to send them.
   one-off affordance, it is worth deciding on a single convention for
   "this thing has a context menu" and applying it to all of them.
 
-  Cheapest version: a tooltip on the card. The action row already
-  carries nine buttons, so adding a tenth for citation is the less
-  attractive option.
+  **Why it was missed is the useful part (2026-09-12): its author
+  was on a Mac with a trackpad.** Right-click there is a two-finger
+  tap or Ctrl-click — available, but not habitual, and nothing on
+  the card suggests trying it. That reframes the problem: this is
+  not "users overlook a hint we forgot to add", it is a gesture
+  that is awkward on the platform the app is written for first (see
+  the `<Meta>bracketleft` binding in the viewer, which exists for
+  the same reason).
+
+  So a tooltip alone is not enough — a tooltip on a Mac trackpad
+  still requires knowing to right-click. Two better options:
+
+    - **`Gtk.GestureLongPress` alongside the click gesture**, so a
+      press-and-hold opens the same menu. That is the touch and
+      trackpad idiom, and it costs one controller.
+    - **A visible affordance** — the three-dot "more actions" button
+      the HIG uses for exactly this. The action row already carries
+      nine buttons, but a tenth that *replaces* a hidden gesture is
+      a different trade from a tenth that duplicates a visible one.
+
+  Cheapest version remains a tooltip on the card, but it should be
+  understood as a hint for people who already right-click, not as
+  the fix.
 - **DONE 2026-09-06** — `BrowserWindow._author_avatar`, a leading
   column in the popover grid spanning both of an author's rows.
   Built as specified below: `Adw.Avatar` with a custom image and
