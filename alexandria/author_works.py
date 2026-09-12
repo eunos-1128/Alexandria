@@ -1419,6 +1419,25 @@ class AuthorPage(Gtk.Box):
         self._rebuild_coauth_chips(works)
         return False
 
+    def _cache_first_publication_year(self, counts_by_year):
+        """Store the earliest year this author published, from the
+        profile's per-year counts.
+
+        The earliest year with a non-zero `works_count`, not simply the
+        first entry: OpenAlex can open the series on a year that only
+        carries citations of earlier work. Measured across real trail
+        rows — Murshudov 1989 (36 entries), Dialpuri 2022 (5),
+        Sheldrick 1934 (60) — which also puts paid to the claim that
+        the series is capped at ten years."""
+        years = [r.get("year") for r in (counts_by_year or [])
+                 if r.get("works_count") and r.get("year")]
+        if not years:
+            return
+        key = index.author_trail_key(self.authorship)
+        if key:
+            index.set_author_first_publication_year(
+                self.conn, key, min(years))
+
     def _empty_status_markup(self):
         """Pick the right "nothing to show" message. When OpenAlex is
         refusing us, the empty result is a symptom of that rather than
@@ -1475,6 +1494,11 @@ class AuthorPage(Gtk.Box):
                     "<span size='small' alpha='75%'>{}</span>".format(
                         GLib.markup_escape_text("  ·  ".join(bits))))
             cby = profile.get("counts_by_year") or []
+            # Cache the career start for the sidebar's "First
+            # publication" sort. Free here — the sparkline needs
+            # `counts_by_year` anyway — and the alternative is one
+            # profile fetch per author before the sidebar can draw.
+            self._cache_first_publication_year(cby)
             peak = max((r["cited_by_count"] for r in cby), default=0)
             if peak >= HISTOGRAM_MIN_PEAK:
                 self._hist_data = cby
@@ -2227,6 +2251,9 @@ class AuthorsWindow(Adw.Window):
         self.set_default_size(1000, 720)
         self._pages = {}   # trail key -> AuthorPage
         self._rows = {}    # trail key -> Gtk.ListBoxRow
+        # One setting for every catalogue, because the trail is shared
+        # across them. Read before the sidebar is built.
+        self._sort = _prefs.get_author_trail_sort()
 
         self.split = Adw.NavigationSplitView()
         self.split.set_min_sidebar_width(240)
@@ -2241,7 +2268,9 @@ class AuthorsWindow(Adw.Window):
                                Gtk.PolicyType.AUTOMATIC)
         side_scroll.set_child(self.sidebar)
         side_tb = Adw.ToolbarView()
-        side_tb.add_top_bar(Adw.HeaderBar())
+        side_header = Adw.HeaderBar()
+        side_header.pack_end(self._build_sort_button())
+        side_tb.add_top_bar(side_header)
         side_tb.set_content(side_scroll)
         self.split.set_sidebar(
             Adw.NavigationPage.new(side_tb, "Alexandria: Authors"))
@@ -2289,8 +2318,158 @@ class AuthorsWindow(Adw.Window):
 
         # Rebuild the sidebar from the persisted trail. No pages are
         # created (and nothing is fetched) until a row is selected.
-        for entry in index.list_author_trail(self.conn):
+        for entry in index.list_author_trail(self.conn, self._sort):
             self._append_row(entry)
+        self._update_empty_state()
+
+    # --- Sidebar ordering ---------------------------------------------
+
+    # (action target, menu label). "Custom" leads because it is the
+    # default and because it is the only one the user authors.
+    _SORT_LABELS = (
+        ("custom", "Custom (drag to arrange)"),
+        ("surname", "Surname"),
+        ("added", "Date added"),
+        ("first_publication", "First publication"),
+    )
+
+    def _build_sort_button(self):
+        """The sidebar header's sort menu.
+
+        A menu rather than the segmented control the works list uses:
+        four options with labels this long do not fit a 240px sidebar,
+        and a stateful action renders them as radio items for free, so
+        the current order is visible without a second widget saying
+        so."""
+        action = Gio.SimpleAction.new_stateful(
+            "sort", GLib.VariantType.new("s"),
+            GLib.Variant.new_string(self._sort))
+        action.connect("activate", self._on_sort_action)
+        group = Gio.SimpleActionGroup()
+        group.add_action(action)
+        self.insert_action_group("trail", group)
+        self._sort_action = action
+
+        menu = Gio.Menu()
+        for value, label in self._SORT_LABELS:
+            item = Gio.MenuItem.new(label, None)
+            item.set_action_and_target_value(
+                "trail.sort", GLib.Variant.new_string(value))
+            menu.append_item(item)
+
+        btn = Gtk.MenuButton()
+        btn.set_icon_name("view-sort-descending-symbolic")
+        btn.set_tooltip_text("Sort the author list")
+        btn.set_menu_model(menu)
+        return btn
+
+    def _on_sort_action(self, action, param):
+        action.set_state(param)
+        self._set_sort(param.get_string())
+
+    def _set_sort(self, order):
+        """Switch order, remember it, redraw."""
+        if order == self._sort or order not in index.TRAIL_SORTS:
+            return
+        self._sort = order
+        _prefs.set_author_trail_sort(order)
+        self._rebuild_sidebar()
+        if order == "first_publication":
+            self._start_first_year_backfill()
+
+    def _start_first_year_backfill(self):
+        """Fetch the missing career-start years, once per session.
+
+        Without this the sort is honest but useless on first use: a
+        year is cached only when an author's page has been opened, so a
+        trail of 27 people visited twice sorts 25 of them as "unknown"
+        and the order collapses to alphabetical. One profile request per
+        missing author, in a thread, with the sidebar re-sorting as the
+        answers land — 27 requests for a trail that size, which is why
+        it happens on demand rather than at startup."""
+        if getattr(self, "_first_year_backfill_done", False):
+            return
+        missing = [r for r in index.list_author_trail(self.conn)
+                   if not r.get("first_publication_year")
+                   and (r.get("openalex_id") or r.get("orcid"))]
+        if not missing:
+            return
+        self._first_year_backfill_done = True
+        threading.Thread(target=self._first_year_worker,
+                         args=(missing,), daemon=True).start()
+
+    def _first_year_worker(self, rows):
+        path = index.db_path_of(self.conn)
+        if not path:
+            return
+        conn = index.connect_existing(path)
+        try:
+            found = 0
+            for row in rows:
+                # The breaker is the one signal that says "stop asking"
+                # — an unkeyed or rate-limited session should not spend
+                # 27 doomed requests to sort a list.
+                if metrics.openalex_paused_until() > 0:
+                    break
+                profile = metrics.fetch_author_profile(
+                    orcid=row.get("orcid"),
+                    openalex_id=row.get("openalex_id"))
+                years = [r.get("year")
+                         for r in ((profile or {}).get("counts_by_year") or [])
+                         if r.get("works_count") and r.get("year")]
+                if not years:
+                    continue
+                if index.set_author_first_publication_year(
+                        conn, row["key"], min(years)):
+                    found += 1
+            if found:
+                GLib.idle_add(self._refresh_if_sorted_by_first_publication)
+        except Exception:
+            pass          # the sidebar still works, just less sorted
+        finally:
+            conn.close()
+
+    def _refresh_if_sorted_by_first_publication(self):
+        """Re-sort only if the user is still looking at that order —
+        the backfill takes seconds and they may have moved on."""
+        if self._sort == "first_publication":
+            self._rebuild_sidebar()
+        return False
+
+    def _commit_displayed_order_as_custom(self):
+        """Freeze what is on screen into `position`, and switch to
+        Custom — without redrawing, because the rows are already in the
+        order being frozen."""
+        keys = []
+        row = self.sidebar.get_row_at_index(0)
+        i = 0
+        while row is not None:
+            keys.append(row.trail_entry["key"])
+            i += 1
+            row = self.sidebar.get_row_at_index(i)
+        index.set_author_trail_order(self.conn, keys)
+        self._sort = "custom"
+        _prefs.set_author_trail_sort("custom")
+        if getattr(self, "_sort_action", None) is not None:
+            self._sort_action.set_state(GLib.Variant.new_string("custom"))
+
+    def _rebuild_sidebar(self):
+        """Redraw the rows in the current order, keeping the selection.
+
+        Pages are cached in `self._pages` by key, so reselecting the
+        open author shows the same page rather than re-fetching it —
+        which is what makes switching order cheap enough to be a
+        casual act."""
+        selected = self.sidebar.get_selected_row()
+        selected_key = (selected.trail_entry["key"]
+                        if selected is not None else None)
+        for row in list(self._rows.values()):
+            self.sidebar.remove(row)
+        self._rows.clear()
+        for entry in index.list_author_trail(self.conn, self._sort):
+            self._append_row(entry)
+        if selected_key and selected_key in self._rows:
+            self.sidebar.select_row(self._rows[selected_key])
         self._update_empty_state()
 
     def _update_empty_state(self):
@@ -2504,6 +2683,14 @@ class AuthorsWindow(Adw.Window):
         """Move `key`'s row to `insert_idx` (an index in the current
         row order, before removal) — widget move + persistent
         position rewrite in one place."""
+        # A drag inside a sorted view is an explicit request for a
+        # hand-made order, so take it as one: write the displayed order
+        # into `position` and switch to Custom before moving anything.
+        # Otherwise `move_author_trail` would renumber against
+        # positions the user cannot see, quietly scrambling the
+        # arrangement they built under Custom.
+        if self._sort != "custom":
+            self._commit_displayed_order_as_custom()
         row = self._rows[key]
         cur = row.get_index()
         if cur < insert_idx:

@@ -971,10 +971,124 @@ def add_author_trail(conn, authorship):
         "SELECT * FROM authors.author_trail WHERE key = ?", (key,)).fetchone())
 
 
-def list_author_trail(conn):
-    """Trail rows in user order (position ascending)."""
-    return [dict(r) for r in conn.execute(
+def _migrate_author_trail(conn):
+    """Add `first_publication_year` to an existing trail table.
+
+    Cached on the row rather than fetched when the sidebar sorts: the
+    value comes from `counts_by_year[0]["year"]` on the author profile,
+    so sorting without a cache would mean one HTTP request per author
+    before the panel could draw. A career only gains an earlier paper
+    if OpenAlex learns of one, which is rare and never urgent."""
+    # Index rather than name: this runs inside `attach_authors_db`,
+    # which a caller may reach before setting a row factory.
+    cols = {r[1] for r in
+            conn.execute("PRAGMA authors.table_info(author_trail)")}
+    if "first_publication_year" not in cols:
+        conn.execute("ALTER TABLE authors.author_trail "
+                     "ADD COLUMN first_publication_year INTEGER")
+
+
+# How the sidebar can be ordered. `custom` is the drag order and stays
+# the default — `move_author_trail` rewrites `position`, and a sort that
+# silently overrode it would make dragging meaningless.
+TRAIL_SORTS = ("custom", "surname", "added", "first_publication")
+
+
+def surname_key(name):
+    """Sort key for a display name, by surname.
+
+    "Airlie J. McCoy" files under M, not A, which is the whole point.
+    The last whitespace-separated token is the surname for the names
+    OpenAlex returns; accents fold so "Ana Casañal" sorts with the
+    unaccented Cs rather than after Z, and the full name follows as a
+    tie-break so two Wangs keep a stable order.
+
+    Particles are deliberately not special-cased: "van Beusekom" files
+    under B here, and whether that or V is correct depends on the
+    country rather than on the name, so neither choice is a bug worth
+    a table of prefixes."""
+    import unicodedata
+    full = (name or "").strip()
+    if not full:
+        return ("", "")
+
+    def fold(s):
+        return "".join(c for c in unicodedata.normalize("NFKD", s.lower())
+                       if not unicodedata.combining(c))
+
+    return (fold(full.split()[-1]), fold(full))
+
+
+def list_author_trail(conn, order="custom"):
+    """Trail rows, ordered by `order` (one of `TRAIL_SORTS`).
+
+    `custom` is the drag order held in `position`. `added` is the true
+    date-added order, which is *not* the same thing: the two agree only
+    until the first drag, because `move_author_trail` rewrites
+    `position` and nothing rewrites `added_at`.
+
+    Surname sorting happens in Python, not SQL — SQLite's default
+    collation cannot see inside "Airlie J. McCoy", and an accent-folding
+    collation would have to be registered on every connection.
+
+    Rows with no cached `first_publication_year` sort last under that
+    order, rather than ahead of 1989 as a NULL would: an author whose
+    profile has not been opened yet is unknown, not ancient."""
+    rows = [dict(r) for r in conn.execute(
         "SELECT * FROM authors.author_trail ORDER BY position").fetchall()]
+    if order == "surname":
+        rows.sort(key=lambda r: surname_key(r.get("name")))
+    elif order == "added":
+        rows.sort(key=lambda r: (r.get("added_at") or "", r.get("position")))
+    elif order == "first_publication":
+        rows.sort(key=lambda r: (r.get("first_publication_year") is None,
+                                 r.get("first_publication_year") or 0,
+                                 surname_key(r.get("name"))))
+    return rows
+
+
+def set_author_trail_order(conn, keys):
+    """Rewrite `position` so the trail reads in `keys` order.
+
+    What "commit this sort as my arrangement" needs: a drag inside a
+    sorted sidebar means the user wants their own order starting from
+    what they can see, and `move_author_trail` alone cannot express
+    that — it moves one row among positions that no longer match the
+    display. Keys not listed keep their relative order after the
+    listed ones, so a stale caller cannot lose a row."""
+    listed = [k for k in (keys or [])]
+    known = {r[0] for r in conn.execute(
+        "SELECT key FROM authors.author_trail")}
+    order = [k for k in listed if k in known]
+    order += [r[0] for r in conn.execute(
+        "SELECT key FROM authors.author_trail ORDER BY position")
+        if r[0] not in set(order)]
+    for pos, key in enumerate(order, start=1):
+        conn.execute(
+            "UPDATE authors.author_trail SET position = ? WHERE key = ?",
+            (pos, key))
+    conn.commit()
+    return len(order)
+
+
+def set_author_first_publication_year(conn, key, year):
+    """Cache the year of an author's earliest known paper.
+
+    Called when the author page has a profile in hand — the sparkline
+    already needs `counts_by_year`, so this costs no extra request.
+    Returns True when the stored value changed."""
+    if not key or not year:
+        return False
+    try:
+        year = int(year)
+    except (TypeError, ValueError):
+        return False
+    cur = conn.execute(
+        "UPDATE authors.author_trail SET first_publication_year = ? "
+        "WHERE key = ? AND (first_publication_year IS NULL "
+        "OR first_publication_year <> ?)", (year, key, year))
+    conn.commit()
+    return cur.rowcount > 0
 
 
 def touch_author_trail(conn, key):
@@ -1193,6 +1307,7 @@ def attach_authors_db(conn, path=None):
     conn.executescript(CREATE_AUTHOR_FUNDING)
     conn.executescript(CREATE_GTR_PROJECTS)
     conn.executescript(CREATE_AUTHOR_TRAIL)
+    _migrate_author_trail(conn)
     _merge_author_tables_into_shared(conn)
     # Two catalogues can hold the same person under two key kinds,
     # and the union is where that first becomes visible. Cheap (one

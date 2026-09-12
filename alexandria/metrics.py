@@ -893,8 +893,13 @@ def fetch_author_profile(orcid=None, openalex_id=None):
     affiliations: [{display_name, openalex_id, year_min, year_max}, ...]}
     or None.
 
-    counts_by_year is OpenAlex's per-year totals (capped at ~10 years),
-    sorted oldest-first.
+    counts_by_year is OpenAlex's per-year totals, sorted oldest-first.
+    It is *not* capped at ten years, whatever this docstring used to
+    say — measured 2026-09-12 against real author IDs: 36 entries for
+    Murshudov (1989–2026), 60 for Sheldrick (1934–2023), 5 for an
+    author eleven papers into a career. The stale claim was believed
+    once and cost a wrong conclusion about what the sparkline could
+    show, so: it is the whole series.
 
     affiliations is the author's full institution history collapsed
     to one row per institution with the year span condensed to

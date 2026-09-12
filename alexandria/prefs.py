@@ -255,6 +255,27 @@ def set_section_expanded(key, expanded):
     save(data)
 
 
+def get_author_trail_sort(default="custom"):
+    """How the Authors-window sidebar is ordered.
+
+    One setting, not one per catalogue: the trail itself is shared
+    across catalogues, so its order is a property of the person using
+    Alexandria rather than of the library they happen to have open."""
+    value = load().get("author_trail_sort")
+    from .index import TRAIL_SORTS
+    return value if value in TRAIL_SORTS else default
+
+
+def set_author_trail_sort(order):
+    """Persist the sidebar's sort order, so it survives a restart."""
+    from .index import TRAIL_SORTS
+    if order not in TRAIL_SORTS:
+        return
+    data = load()
+    data["author_trail_sort"] = order
+    save(data)
+
+
 def get_contact_email(path=None):
     """The user's own contact address for polite-pool API access, or
     '' when unset.
