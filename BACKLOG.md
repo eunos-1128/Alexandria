@@ -4,6 +4,25 @@ Pending features, roughly grouped. Newest at the top of each section.
 
 ## Top priority
 
+- **DONE 2026-09-12 — fault 2 fixed, fault 1 now self-healing**
+  (`acbda9a`). The dispatch moved where the entry said it belonged:
+  `importer.import_pdf_or_attach` is now the single entry point that
+  both the watcher and `import_tree` call, so a `duplicate` whose
+  match is a ghost attaches from *any* caller. Reconcile therefore
+  rescues what a dropped kqueue event missed, which is what makes
+  fault 1 survivable without ever fixing the monitor.
+
+  The diagnostic note is done too — `_do_reconcile` now prints its
+  tally, so a startup that found nothing no longer looks identical to
+  one that quietly failed.
+
+  **Still open from this entry: reconcile more than once.** Startup is
+  the only trigger; periodic, or on window focus, would close the
+  window between a dropped event and the rescue from hours to minutes.
+  `import_tree` is idempotent, so the only cost is a directory walk.
+
+  Original entry:
+
 - **BUG: a PDF that duplicates a ghost is silently orphaned when the
   watcher misses it, and reconcile can never recover it.** Hits the
   most natural Discover workflow, so it will recur.
@@ -510,6 +529,17 @@ Pending features, roughly grouped. Newest at the top of each section.
   its sidecar still records as `null`.
 
   Original report follows.
+
+- **DONE 2026-09-06** (`a8c8f7f`). `refresh_pdf` no longer overwrites
+  a field it cannot re-derive: the preservation loop covers `doi`,
+  `title`, `authors`, `year`, `journal`, `volume`, `issue` and `pages`,
+  keeping the stored value whenever the fresh extraction comes back
+  blank — with the one deliberate exception that a title which is just
+  the filename is *not* worth preserving. So pasting a DOI and hitting
+  refresh now does what the reporter expected, and a hand-typed title
+  survives a refresh that finds nothing.
+
+  Original entry:
 
 - **BUG: "refresh" destroys a hand-entered DOI, and there is no path
   from "I know the DOI" to "fetch the metadata".** Reported
@@ -2853,6 +2883,16 @@ in the library, so the app already has somewhere better to send them.
   folder).
 
 ## UI
+
+- **DONE 2026-09-12** (`50b747b`). The card's context menu grew an
+  **"Extract as…"** section above the citation styles, with BibTeX and
+  RIS entries; both render the one paper through the existing
+  single-record functions and copy to the clipboard with a toast. The
+  naming question below was settled in favour of "Extract as…", and
+  the menu itself is now reachable by press-and-hold as well as
+  right-click (`f6fa471`).
+
+  Original entry:
 
 - **Copy a card's BibTeX (and RIS) to the clipboard.** There is no way
   to get the BibTeX text for a single paper. Everything needed already
