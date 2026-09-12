@@ -1046,6 +1046,52 @@ Pending features, roughly grouped. Newest at the top of each section.
   Cheap enough to do before the sioyek-style target indexing, and
   independent of it.
 
+- **Review Paperlib, and ask whether the metadata chain wants to be
+  an adapter interface.** Filed 2026-09-10 after seeing Paperlib's
+  extension marketplace.
+
+  Paperlib ships a small core and pushes metadata sources out to
+  installed extensions — `metadata-scrape`, `entry-scrape`, and
+  field-specific ones like `cn-scrape` (Chinese papers) and
+  `ccf-rank` (Chinese CS venue rankings). Ours is hard-wired, in
+  `extract._enrich` and `metrics`: page-1 raw scan → filename
+  decoders → 4-page scan → CrossRef → OpenAlex, with JATS behind
+  that.
+
+  **The question is not "should Alexandria have plugins".** For a
+  single-user local app that is a lot of machinery for little, and
+  a marketplace is a maintenance burden with a security surface.
+  The narrower question is whether the *source chain* should sit
+  behind a common interface — `resolve(identifier) -> record`, with
+  an ordered list of adapters — even if every adapter ships in the
+  repo and nothing is installable.
+
+  **Two arguments that it should**, both already in this file:
+    - the GtR entry above concludes exactly this for funders, "each
+      funder as a pluggable adapter behind a common interface,
+      shipping one source at a time";
+    - `cn-scrape` and `ccf-rank` exist because a fixed chain cannot
+      serve a field it was not written for. Ours is tuned to
+      structural biology and crystallography — which is the right
+      call for its user, and the reason it would serve a historian
+      or an economist badly.
+
+  **An argument that it should not:** the chain's *order* carries
+  hard-won knowledge — raw before layout, filename decoders
+  chained rather than replaced, CrossRef before the page scrape —
+  and every one of those orderings was a bug fix. An adapter list
+  makes the order configurable, and a user who reorders it gets the
+  bugs back.
+
+  **Also worth noting: half the marketplace is what we build
+  inline.** citation-count, ai-summary, paper-locate, preview — we
+  have all four. That the feature set matches is reassuring; that
+  they chose to make them extensions is the part to think about.
+
+  Read before deciding: how Paperlib's scrape extensions declare
+  what they can handle, and whether the core picks one or runs them
+  all.
+
 - **Review sioyek and Hammer PDF.** Asked for 2026-09-10. Two
   existing readers aimed at exactly our reader — someone working
   through scientific papers — and both have shipped features we are
