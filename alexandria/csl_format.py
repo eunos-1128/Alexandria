@@ -18,6 +18,7 @@ able to drop additional `.csl` files into `~/.config/Alexandria/
 styles/` later (not yet implemented)."""
 
 import os
+import re
 
 from citeproc import (CitationStylesStyle, CitationStylesBibliography,
                       Citation, CitationItem, formatter)
@@ -50,6 +51,25 @@ def list_styles():
         if os.path.isfile(p):
             out.append({"key": s["key"], "label": s["label"], "path": p})
     return out
+
+
+# A bibliography entry that opens with its own number — "[1]Shi S"
+# or "1.Shi, S." — and then runs straight into the text. Vancouver
+# and Nature both set `second-field-align="flush"`, which in a
+# rendered page means the number sits in its own column and the
+# entry hangs beside it. Plain text has no columns, so citeproc
+# emits the two adjacent and the space is simply missing.
+#
+# Anchored, and requires a non-space immediately after, so it can
+# only fire where the output is wrong: an in-text marker ("[1]" on
+# its own) and every style that opens with an author name are left
+# alone.
+_FLUSH_NUMBER_RE = re.compile(r"^(\[\d+\]|\d+\.)(?=\S)")
+
+
+def _space_after_flush_number(text):
+    """Put back the space `second-field-align` drops in plain text."""
+    return _FLUSH_NUMBER_RE.sub(r"\1 ", text, count=1)
 
 
 def format_citation(rec, style_key, mode="bibliography"):
@@ -89,4 +109,4 @@ def format_citation(rec, style_key, mode="bibliography"):
     if not rendered:
         return ""
     # Each entry is a list of inline pieces; str() collapses them.
-    return str(rendered[0])
+    return _space_after_flush_number(str(rendered[0]))
