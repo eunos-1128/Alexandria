@@ -1107,6 +1107,37 @@ Pending features, roughly grouped. Newest at the top of each section.
 
 - Page thumbnails sidebar.
 
+- **DONE 2026-09-13** (`262c1c9`). Built as specified: a sidebar-header
+  menu with Custom (default), Surname, Date added and First
+  publication, driven by a stateful action so the live order shows as a
+  ticked radio item. Surname sorts on the last token with accents
+  folded; Date added uses `added_at`; First publication uses a new
+  cached `first_publication_year` column, written when a page is opened
+  and backfilled on demand the first time the order is chosen —
+  otherwise an unvisited trail sorts as all-unknown and collapses to
+  alphabetical. The backfill stops when the OpenAlex breaker is open.
+  One setting for every catalogue. `set_author_trail_order` freezes the
+  displayed order into `position` when a drag happens inside a sorted
+  view, so dragging keeps meaning instead of renumbering against
+  positions the user cannot see.
+
+  **What the real trail then showed, and it is worth knowing: the
+  first-publication year inherits OpenAlex's author conflation, and
+  the earliest year is the single statistic most sensitive to it.**
+  Backfilled across the 27 real rows, the oldest four are *wrong*:
+  Alan Brown 1926 (263 works), David Baker 1957 (1,788),
+  Anthony W. P. Fitzpatrick 1958 (51) — common names merged with
+  namesakes, where one mis-attributed old paper moves the sort key by
+  decades. The young end is right (Dialpuri 2022, Schofield 2022) and
+  so is the middle (Murshudov 1989, McCoy 1993). So the order is
+  *approximately* by career start, and reads as nonsense precisely for
+  the names a conflated record was always going to spoil. See the
+  suspect-conflated-author entry under `## Discovery`; this sort is a
+  new and unusually legible symptom of it, which may make it the
+  cheapest place to surface a "this record looks merged" warning.
+
+  Original entry:
+
 - **Sort the author trail.** Asked for 2026-09-10: the left-hand
   panel of the Authors window needs a sort control —
   alphabetically, by when the author was added (as now), and by
@@ -2074,6 +2105,37 @@ Pending features, roughly grouped. Newest at the top of each section.
   Low priority because the user can usually spot the chimera
   themselves once they open the works window — but a quiet hint
   before they get there is friendlier.
+
+  **Promoted 2026-09-13: it is no longer only a Discover concern,
+  and there is now a one-number test for it.** The new
+  first-publication sort backfilled a career-start year for all 27
+  authors on the real trail, and the four oldest are all conflations:
+  Alan Brown 1926, David Baker 1957, Anthony W. P. Fitzpatrick 1958,
+  George M. Sheldrick 1934. An earliest-publication year is the most
+  conflation-sensitive statistic there is — one mis-merged old paper
+  moves it by decades — so **"career span implied by
+  `counts_by_year` exceeds ~65 years" is a cheap, decisive heuristic**
+  that needs no affiliation parsing and no topic trees. It is already
+  computed: the sort caches the first year, and the last year is the
+  other end of the same list.
+
+  That makes the author page, not the Discover dialog, the natural
+  home for the warning chip — and the sidebar could mark the row
+  rather than wait to be asked.
+
+  **A second, rarer failure found while measuring it (n=1 of 19
+  trail rows carrying both identifiers): the same person can have
+  two OpenAlex records, and `fetch_author_profile` prefers the
+  worse one.** Martin Steinegger resolves by ORCID
+  (`0000-0001-8781-9753`) to a stub with **2 works, 2026 only**, and
+  by OpenAlex ID (`A5019985343`) to the real record with **176 works
+  from 1999**. Every caller passes both and the ORCID wins, so his
+  author page shows the stub — wrong works count, wrong sparkline,
+  wrong career start. Not changed on a sample of one; worth a
+  *sanity* rule rather than a preference flip, e.g. fetch both when
+  both identifiers are known and keep the record with more works, or
+  at least distrust an ORCID record whose `works_count` is in single
+  figures.
 
 ## Sharing
 
