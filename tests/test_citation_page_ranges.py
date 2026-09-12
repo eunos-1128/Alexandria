@@ -7,9 +7,10 @@ and thereby exposed a crash: `chicago-author-date` raised
 
 The cause is a version mismatch in a vendored style. CSL 1.0.2
 renamed `page-range-format="chicago"` to `chicago-15`/`chicago-16`;
-citeproc-py only implements the old name, so `chicago-16` matches
-none of its branches, the block that assigns `index` is skipped, and
-`_format_last_page` raises on the next line.
+citeproc-py 0.9.2 only implements the old name, so `chicago-16`
+matched none of its branches, the block that assigns `index` was
+skipped, and `_format_last_page` raised on the next line. Fixed
+upstream; the pin now requires >=0.11.1.
 
 Latent until the volume/issue/pages work landed, because before that
 no sidecar carried a `pages` field at all. Nineteen did by the time
@@ -62,15 +63,18 @@ def test_the_page_range_reaches_the_output(style):
     assert "101" in out
 
 
-def test_no_vendored_style_asks_for_a_page_format_citeproc_lacks():
+def test_the_renderer_is_new_enough_for_the_vendored_styles():
     """The real lesson: a CSL file can name a feature the renderer
     does not implement, and the failure is a crash rather than a
-    graceful fallback. citeproc-py knows `chicago`, `expanded`,
-    `minimal` and `minimal-two`."""
-    import re
-    supported = {"chicago", "expanded", "minimal", "minimal-two"}
-    for style in csl_format.list_styles():
-        with open(style["path"]) as fh:
-            for found in re.findall(r'page-range-format="([^"]+)"',
-                                    fh.read()):
-                assert found in supported, (style["key"], found)
+    graceful fallback.
+
+    citeproc-py 0.9.2 knew only `page-range-format="chicago"`, while
+    CSL 1.0.2 renamed it `chicago-15`/`chicago-16` — so the canonical
+    Chicago style crashed. Rather than editing the vendored style to
+    suit an old renderer, the pin requires one that implements it.
+    This test fails loudly if that pin is ever relaxed."""
+    import citeproc
+
+    major, minor = (int(p) for p in citeproc.__version__.split(".")[:2])
+
+    assert (major, minor) >= (0, 11), citeproc.__version__
