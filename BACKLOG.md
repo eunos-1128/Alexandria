@@ -2123,6 +2123,15 @@ Pending features, roughly grouped. Newest at the top of each section.
   home for the warning chip — and the sidebar could mark the row
   rather than wait to be asked.
 
+  **FIXED 2026-09-13** (`14b059b`) — the second finding below, once a
+  screenshot showed what it looks like: "2 works · h-index 0" over a
+  full and correct list of that author's papers. The stored OpenAlex ID
+  now wins over the ORCID in `fetch_author_profile`, falling back to
+  the ORCID when the ID lookup fails or returns a record whose own
+  ORCID differs. The reason only the header was wrong is worth keeping:
+  every other call on the page filters *works*, and a works filter does
+  not care which author entity OpenAlex files them under.
+
   **A second, rarer failure found while measuring it (n=1 of 19
   trail rows carrying both identifiers): the same person can have
   two OpenAlex records, and `fetch_author_profile` prefers the
