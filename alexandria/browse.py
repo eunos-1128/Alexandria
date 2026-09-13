@@ -4037,6 +4037,15 @@ class BrowserWindow(Adw.ApplicationWindow):
         results = {"imported": [], "duplicate": [], "exists": [],
                    "error": [], "merged": []}
         for src in paths:
+            # Same "Importing x…" toast a file appearing in the library
+            # directory gets. A drop never raised one: the toast is
+            # fired by the watcher, and this path deliberately
+            # suppresses the watcher to stop the two importing the same
+            # file at once. So the one route a user is most likely to
+            # take was the one route that said nothing until the card
+            # appeared. Reuses the coalescing — named for one or two
+            # files, "Importing N PDFs…" at three or more.
+            GLib.idle_add(self._on_import_start, os.path.basename(src))
             # Path C — auto-merge: if the dropped PDF's DOI matches a
             # ghost in the library, run the merge flow directly so
             # the BibTeX provenance is preserved.
