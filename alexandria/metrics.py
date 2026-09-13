@@ -886,6 +886,61 @@ def fetch_works_by_author(orcid=None, openalex_id=None, since=None,
     return results
 
 
+def _fetch_author_entity(path):
+    url = "https://api.openalex.org/authors/" + path
+    if OPENALEX_MAILTO:
+        url += "?mailto=" + urllib.parse.quote(OPENALEX_MAILTO)
+    return _http_get_json(
+        url,
+        headers={"User-Agent": OPENALEX_UA, "Accept": "application/json"},
+        timeout=15)
+
+
+def _author_record(openalex_id, orcid):
+    """The OpenAlex author entity for a person, preferring the stored
+    OpenAlex ID over the ORCID.
+
+    **Two records can carry the same ORCID**, and `/authors/orcid:…`
+    resolves to exactly one of them — not necessarily the one with the
+    work. Measured 2026-09-13: ORCID `0000-0001-8781-9753` resolves to
+    `A5138223712`, created 2026-06-10, with **2 works and 0 citations**,
+    while `A5019985343` — the same name, the same ORCID on the record —
+    has **175 works and 82,591 citations**. The author page showed "2
+    works · h-index 0" above a correct and full list of papers, because
+    everything else here filters *works* (`author.orcid:…`), which is
+    identity-agnostic, while this one call resolves an *entity*.
+
+    So the stored OpenAlex ID wins: it came from the authorships on
+    papers actually in the library, which is to say from the record
+    that owns the work. Two fallbacks keep that from being a new way to
+    be wrong — if the ID fetch fails, and if the record it returns
+    carries a *different* ORCID from the one we hold (in which case the
+    stored ID belongs to somebody else, and the ORCID is the better
+    identity).
+
+    Measured across the 19 trail rows holding both identifiers: one
+    disagreement, the one above, and the ID record is the right one.
+    """
+    data = None
+    if openalex_id:
+        data = _fetch_author_entity(urllib.parse.quote(openalex_id, safe=""))
+        if data is not None and orcid:
+            found = _bare_orcid(data.get("orcid"))
+            if found and found != _bare_orcid(orcid):
+                data = None
+    if data is None and orcid:
+        data = _fetch_author_entity(
+            "orcid:" + urllib.parse.quote(orcid, safe=""))
+    return data
+
+
+def _bare_orcid(value):
+    """`0000-0001-8781-9753` from any of the forms OpenAlex returns."""
+    if not value:
+        return None
+    return str(value).rstrip("/").rsplit("/", 1)[-1].strip().lower() or None
+
+
 def fetch_author_profile(orcid=None, openalex_id=None):
     """Return {works_count, cited_by_count, h_index, i10_index, name,
     orcid (bare digits or None),
@@ -907,18 +962,7 @@ def fetch_author_profile(orcid=None, openalex_id=None):
     "where do they work *now*" question gets a fast answer."""
     if not orcid and not openalex_id:
         return None
-    if orcid:
-        url = "https://api.openalex.org/authors/orcid:" + urllib.parse.quote(
-            orcid, safe="")
-    else:
-        url = "https://api.openalex.org/authors/" + urllib.parse.quote(
-            openalex_id, safe="")
-    if OPENALEX_MAILTO:
-        url += "?mailto=" + urllib.parse.quote(OPENALEX_MAILTO)
-    data = _http_get_json(
-        url,
-        headers={"User-Agent": OPENALEX_UA, "Accept": "application/json"},
-        timeout=15)
+    data = _author_record(openalex_id, orcid)
     if data is None:
         return None
     summ = data.get("summary_stats") or {}
