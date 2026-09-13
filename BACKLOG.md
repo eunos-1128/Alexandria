@@ -2186,6 +2186,68 @@ Pending features, roughly grouped. Newest at the top of each section.
 
 ## Sharing
 
+- **Share the annotations, not the sidecar.** Asked for 2026-09-13,
+  and it is a deliberate narrowing of the whole-sidecar sharing idea
+  further down this section, which kept stalling on questions nobody
+  wants to answer: whose title wins, what happens to *their* tags and
+  mark and citation counts, is an incoming `.alexandria` allowed to
+  overwrite a local record at all.
+
+  **The observation that dissolves most of that: almost nothing in a
+  sidecar is hand-made.** Title, authors, year, journal, DOI, volume,
+  citations, keywords, abstract, funders, OA status, JATS — all of it
+  is fetched, and the recipient's copy of the same paper already has
+  it, or can. Sending it is at best redundant and at worst a way to
+  overwrite good data with someone else's stale copy.
+
+  The hand-made part is the **highlights and their comments** (plus
+  arguably `notes`, the free-text field, which is the same kind of
+  thing). That is the part with no other source in the world, and the
+  only part actually worth sending. Now visible in the editor
+  read-only (`bef6e1b`), which is what makes their absence from any
+  transfer path obvious.
+
+  **What a transfer has to carry.** A highlight is
+  `{id, page, quads, text, color, comment, author, created, modified}`.
+  The quads are PDF points on a page of *a specific file*, so the
+  payload needs enough identity for the receiving end to know it has
+  the same paper: DOI first, `sha256` as the strong check, title and
+  year as the human-readable fallback for a paper with no DOI. Same
+  DOI but a different SHA is the interesting case — same paper,
+  different PDF (preprint vs published, or a different scan) — where
+  the quads may not land. Better to import the text and comment
+  anchored to nothing than to refuse, or to place a highlight over the
+  wrong words.
+
+  **Export, following the BibTeX model.** `bibtex_export` already has
+  the shape: a pure `sidecar_to_*` function, a whole-library
+  `export_rows_to_file` behind a save dialog, and — since `50b747b` —
+  a single-paper **Extract as…** entry on the card's context menu that
+  renders one record to the clipboard. Annotations want exactly those
+  three: `annotations_export.sidecar_to_annotations(rec)`, a
+  library-wide file export, and a per-card "Extract as… → Annotations"
+  that puts one paper's marks on the clipboard for pasting into an
+  email. Plain JSON rather than a new grammar — it is machine-read at
+  the far end, and JSON is what the sidecar already is.
+
+  **Import** is the half the earlier entry never got to. A dropped
+  `.annotations` (or a pasted blob) matches by DOI/SHA, then merges by
+  highlight `id`: an id already present is an update if `modified` is
+  newer and a no-op otherwise, an unknown id is an addition. Nothing
+  is deleted by an import, ever — a colleague's file is additive, and
+  a merge that removed your own marks because they were absent from
+  their copy would be unforgivable. `author` is already on every
+  highlight, so a merged set can say who wrote which comment, and the
+  viewer's sidebar can group or colour by it.
+
+  **Worth deciding early:** whether an imported comment is
+  distinguishable from your own for ever (an `origin` field), or just
+  by its `author` string. The second is free and probably enough.
+
+  This also gives the "email a colleague what I thought of this paper"
+  case a real answer without any of the sync, conflict-resolution or
+  server machinery under *Not soon*.
+
 - **DONE 2026-09-05: author avatars are now in one shared store.**
   Option 1 below, at `$XDG_DATA_HOME/Alexandria/author-images/`.
   `author_image.images_dir()` is the single choke point; `root=`
