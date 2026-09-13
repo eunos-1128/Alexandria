@@ -80,6 +80,46 @@ def _parse_year(s):
         return None
 
 
+def highlights_text(highlights):
+    """The sidecar's highlights as plain text, for the read-only view.
+
+    Kept apart from the widget so the formatting can be tested without
+    a display, and pure so it cannot be the thing that stops the editor
+    opening on a malformed sidecar — a highlight that is not a dict, or
+    carries no text, is skipped rather than raised over.
+
+    Ordered by page and then down the page, not by when each was made:
+    this is a view of the paper, and someone checking what they marked
+    reads it the way they read the document. Page numbers are stored
+    0-based and shown 1-based, matching the viewer."""
+    rows = []
+    for h in highlights or []:
+        if not isinstance(h, dict):
+            continue
+        page = h.get("page")
+        page = page if isinstance(page, int) else 10 ** 6
+        quads = h.get("quads") or []
+        try:
+            top = float(quads[0][1])
+        except (IndexError, TypeError, ValueError):
+            top = 0.0
+        rows.append((page, top, h))
+    rows.sort(key=lambda r: (r[0], r[1]))
+
+    lines = []
+    for page, _top, h in rows:
+        where = "p.{}".format(page + 1) if page < 10 ** 6 else "—"
+        text = " ".join((h.get("text") or "").split())
+        lines.append("{}  “{}”".format(where, text) if text
+                     else "{}  (no text captured)".format(where))
+        comment = " ".join((h.get("comment") or "").split())
+        if comment:
+            who = (h.get("author") or "").strip()
+            lines.append("       — {}{}".format(
+                comment, "  ({})".format(who) if who else ""))
+    return "\n".join(lines)
+
+
 def open_editor(parent, conn, pdf_path, sidecar_path, on_saved):
     """Open a modal editor window. on_saved() is called after a successful
     save so the caller can refresh."""
@@ -502,15 +542,46 @@ def open_editor(parent, conn, pdf_path, sidecar_path, on_saved):
     add_label("Notes:", 9)
     grid.attach(notes_scroll, 1, 9, 1, 1)
 
+    # Highlights: shown, never edited. They are made by selecting text
+    # in the viewer, and that is where they belong — a text box here
+    # could not tell you which words on which page it would re-anchor
+    # to. What this answers is the question the editor could not: does
+    # this paper carry any marks, and what did I say about them.
+    marks = highlights_text(rec.get("highlights"))
+    if marks:
+        hl_view = Gtk.TextView()
+        hl_view.set_editable(False)
+        hl_view.set_cursor_visible(False)
+        hl_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        hl_view.set_top_margin(4)
+        hl_view.set_left_margin(4)
+        hl_view.set_right_margin(4)
+        hl_view.set_bottom_margin(4)
+        # Not sensitive-off: that greys the text out and, worse, stops
+        # selection. Read-only here means "cannot be changed", not
+        # "cannot be copied" — a quotation is exactly what someone
+        # wants out of this box.
+        hl_view.add_css_class("dim-label")
+        _set_textview(hl_view, marks)
+        hl_scroll = Gtk.ScrolledWindow()
+        hl_scroll.set_min_content_height(120)
+        hl_scroll.set_hexpand(True)
+        hl_scroll.set_child(hl_view)
+        hl_scroll.set_has_frame(True)
+        n = len([h for h in (rec.get("highlights") or [])
+                 if isinstance(h, dict)])
+        add_label("Highlights ({}):".format(n), 10)
+        grid.attach(hl_scroll, 1, 10, 1, 1)
+
     hand_edited_check = Gtk.CheckButton(label="Hand-edited (don't overwrite on refresh)")
     hand_edited_check.set_active(bool(rec.get("hand_edited", False)))
-    grid.attach(hand_edited_check, 1, 10, 1, 1)
+    grid.attach(hand_edited_check, 1, 11, 1, 1)
 
     path_lbl = Gtk.Label()
     path_lbl.set_markup("<small><tt>{}</tt></small>".format(pdf_path))
     path_lbl.set_halign(Gtk.Align.START)
     path_lbl.set_selectable(True)
-    grid.attach(path_lbl, 1, 11, 1, 1)
+    grid.attach(path_lbl, 1, 12, 1, 1)
 
     scrolled.set_child(grid)
     outer.append(find_frame)
