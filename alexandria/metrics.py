@@ -2627,6 +2627,76 @@ def _surname(name):
     return parts[-1] if parts else ""
 
 
+def normalised_title(title):
+    """A title reduced to what two records should agree on.
+
+    Lower-cased, with everything that is not a letter or digit removed
+    — *including spaces*, which is the load-bearing part. OpenAlex
+    stores the 2002 Acta Cryst D paper as "Substructure solution
+    withSHELXD": the journal italicised the program name and the space
+    was lost on ingestion. Comparing on words would reject the right
+    record; comparing on letters accepts it."""
+    return re.sub(r"[^a-z0-9]+", "", (title or "").lower())
+
+
+def is_recommendation_record(doi, title=None):
+    """True for a Faculty Opinions / F1000 record — a review *of* a
+    paper, carrying that paper's title.
+
+    They are a trap for any title search: searching OpenAlex for
+    "Substructure solution with SHELXD" returns exactly one result,
+    and it is `10.3410/f.1009497.145157`, "Faculty Opinions
+    recommendation of Substructure solution with SHELXD", authored by
+    the recommender. Importing that would give the paper the wrong
+    DOI, the wrong author and no relation to the work in hand."""
+    if (doi or "").lower().startswith("10.3410/"):
+        return True
+    t = (title or "").lower()
+    return t.startswith("faculty opinions recommendation of") \
+        or t.startswith("f1000 recommendation of")
+
+
+def find_doi_by_title_search(title, year=None, timeout=20):
+    """Resolve a DOI from a title alone, via OpenAlex's *general*
+    search, accepting only an exact normalised-title match.
+
+    `title.search` is the obvious tool and it fails on exactly the
+    records that need help: it is word-based, so the "withSHELXD"
+    ingestion defect makes the real paper unfindable while the Faculty
+    Opinions record about it matches perfectly. The general `search`
+    parameter is fuzzier — 889 results for that query — which is only
+    safe because the acceptance test is strict: the candidate's title
+    must equal ours letter for letter once spaces and punctuation are
+    dropped. The real paper was third of the 889.
+
+    A year, when both are known, must agree within a year: journals
+    put a 2002 issue online in 2003 often enough that equality is too
+    strict."""
+    want = normalised_title(title)
+    if len(want) < 12:          # too short to be distinctive
+        return None
+    params = [("search", title), ("per_page", "25")]
+    if OPENALEX_MAILTO:
+        params.append(("mailto", OPENALEX_MAILTO))
+    data = _http_get_json(
+        "https://api.openalex.org/works?" + urllib.parse.urlencode(params),
+        headers={"User-Agent": OPENALEX_UA, "Accept": "application/json"},
+        timeout=timeout)
+    if not data:
+        return None
+    for w in (data.get("results") or []):
+        cand_doi = _normalize_doi(w.get("doi"))
+        if not cand_doi or is_recommendation_record(cand_doi, w.get("title")):
+            continue
+        if normalised_title(w.get("title")) != want:
+            continue
+        cand_year = w.get("publication_year")
+        if year and cand_year and abs(int(cand_year) - int(year)) > 1:
+            continue
+        return cand_doi
+    return None
+
+
 def find_doi(title, year=None, author_names=None, journal=None):
     """Search OpenAlex for a Work matching the given title (+ optional
     year, authors, journal) and return its DOI string, or None.
@@ -2671,6 +2741,8 @@ def find_doi(title, year=None, author_names=None, journal=None):
     for w in (data.get("results") or []):
         cand_doi = _normalize_doi(w.get("doi"))
         if not cand_doi:
+            continue
+        if is_recommendation_record(cand_doi, w.get("title")):
             continue
         # Author-overlap gate (skip if the caller didn't give us authors).
         if surnames_lc:

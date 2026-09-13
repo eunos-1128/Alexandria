@@ -561,10 +561,23 @@ def _build_record(pdf_path):
     rec["doi"] = extracted["doi"]
     rec["journal"] = extracted["journal"]
     rec["raw"] = extracted["raw"]
-    # Publishers stamp volume / issue / pages into the PDF's own PRISM
-    # XMP block, which `extract` already lifts into `raw` — it was
-    # simply never read. A DOI resolve overwrites these later with the
-    # better answer; this is what a paper without one still gets.
+    # Volume / issue / pages, from weakest source to strongest.
+    #
+    # First whatever extraction resolved — in practice CrossRef. This
+    # is what a *refresh* gets: `_enrich_from_openalex` runs on the
+    # import path only, so before this the sole source here was the
+    # PRISM block below, and a PDF without one kept empty biblio
+    # fields for ever. The 2002 Acta Cryst D paper is exactly that —
+    # no PRISM in the file, 58 / 10 / 1772-1779 at both CrossRef and
+    # OpenAlex, and nothing to carry it into the record.
+    for _f in ("volume", "issue", "pages"):
+        _v = extracted.get(_f)
+        if _v:
+            rec[_f] = str(_v)
+    # Then the PDF's own PRISM XMP block, which publishers stamp and
+    # `extract` already lifts into `raw`. It keeps the precedence it
+    # had. A DOI resolve overwrites both later with the better answer;
+    # this is what a paper without one still gets.
     for _f, _v in metrics.biblio_from_raw(extracted["raw"]).items():
         if _v:
             rec[_f] = _v

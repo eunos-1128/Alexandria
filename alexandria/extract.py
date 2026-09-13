@@ -814,6 +814,18 @@ def _crossref_lookup(doi):
             out["year"] = int(issued[0][0])
         except (ValueError, TypeError, IndexError):
             pass
+    # Volume / issue / pages. The importer's OpenAlex enrichment is the
+    # usual source, but it only runs on the import path — a refresh
+    # took these from the PDF's own PRISM block and nowhere else, so a
+    # PDF without one kept them empty however good the online record
+    # was. Reading them here makes extraction self-sufficient: one
+    # lookup we are making anyway already carries the answer.
+    out["volume"] = (str(msg.get("volume")).strip()
+                     if msg.get("volume") else None)
+    out["issue"] = (str(msg.get("issue")).strip()
+                    if msg.get("issue") else None)
+    out["pages"] = (str(msg.get("page")).strip()
+                    if msg.get("page") else None)
     return out
 
 
@@ -990,6 +1002,59 @@ def drop_pii_artefacts(result, pdf_path=None):
     return result
 
 
+def _doi_by_title(result):
+    """Last resort when the PDF carries no DOI anywhere: ask what paper
+    this title belongs to.
+
+    Papers from before DOIs were printed on the page have nothing for
+    any of the scanners to find — the 2002 Acta Cryst D paper that
+    prompted this has no "doi" string in its text, its metadata or its
+    filename — and until now they imported as `doi: null` and stayed
+    unenriched for ever.
+
+    Three attempts, cheapest and strictest first:
+
+      1. OpenAlex `title.search` with whatever authors and journal we
+         extracted, which is precise when the title is indexed cleanly.
+      2. OpenAlex general search with an exact normalised-title match,
+         which is what rescues a title mangled on ingestion.
+      3. CrossRef's bibliographic matcher, given title plus author
+         surnames — measured as the only route that finds the SHELXD
+         paper from author names, and useless without them.
+
+    Anything that resolves is then verified by the normal CrossRef
+    lookup downstream, so a wrong guess here shows up as a metadata
+    mismatch rather than silently becoming the record."""
+    title = (result.get("title") or "").strip()
+    if not title:
+        return None
+    year = result.get("year")
+    authors = [a for a in (result.get("authors") or []) if a]
+    journal = result.get("journal")
+    try:
+        # Imported here, as elsewhere in this module: `metrics` pulls in
+        # the whole HTTP stack, and extraction runs for every PDF
+        # whether or not it ever needs the network.
+        from . import metrics as _metrics
+        doi = _metrics.find_doi(title, year=year,
+                                author_names=authors or None,
+                                journal=journal)
+        if doi:
+            return doi
+        doi = _metrics.find_doi_by_title_search(title, year=year)
+        if doi:
+            return doi
+        if authors:
+            surnames = " ".join(_metrics._surname(a) for a in authors[:4])
+            doi = _metrics.find_doi_by_citation(
+                "{} {}".format(title, surnames).strip())
+            if doi:
+                return doi
+    except Exception:
+        pass          # a paper with no DOI is still worth importing
+    return None
+
+
 def _enrich(result, pdf_path):
     """If metadata is incomplete, scrape page 1 for a DOI and overlay
     CrossRef data. Also detects SI documents and re-routes them through
@@ -1045,6 +1110,8 @@ def _enrich(result, pdf_path):
             # Some journals (e.g. Science) print the DOI on the references
             # page rather than page 1. Cast a wider net before giving up.
             doi = _scan_doi_in_pages(pdf_path, max_pages=4)
+        if not doi:
+            doi = _doi_by_title(result)
         if doi:
             result["doi"] = doi
 
@@ -1063,6 +1130,12 @@ def _enrich(result, pdf_path):
             result["year"] = cr["year"]
         if cr["journal"]:
             result["journal"] = cr["journal"]
+        # Volume / issue / pages only where we have none: the importer
+        # fills these from OpenAlex, which is usually richer, and this
+        # is the fallback for the records where its `biblio` is empty.
+        for field in ("volume", "issue", "pages"):
+            if not result.get(field) and cr.get(field):
+                result[field] = cr[field]
 
     # Last-resort: scrape page 1 if we still have no title — but skip
     # for SI documents because the cover page describes the parent
