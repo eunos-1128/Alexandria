@@ -682,6 +682,44 @@ Pending features, roughly grouped. Newest at the top of each section.
   Worth doing when something else takes us into `_scrape_doi`;
   not worth a special trip.
 
+- **PART DONE 2026-09-13** (`d22e7b9`) — the *title* route, which the
+  entry below did not consider and which turned out to be the one that
+  works. `extract._doi_by_title` runs when every scanner has failed:
+  OpenAlex `title.search` with whatever authors and journal were
+  extracted, then OpenAlex's general `search` accepting only an exact
+  normalised-title match, then CrossRef's bibliographic matcher given
+  title plus surnames. Measured on the 2002 Acta Cryst D paper that
+  prompted it: routes 2 and 3 both find it, route 1 cannot, and a
+  Faculty Opinions record impersonates it in route 1 unless
+  recommendation records are skipped — which they now are.
+
+  Still open below: the author/journal/year route proper, for a PDF
+  whose title is also missing or useless.
+
+- **The author extractor can lift the journal name off page 1.** Seen
+  2026-09-13 on the same paper: `authors: ["Acta Crystallographica
+  Section D"]`, because the IUCr layout prints the journal name and
+  "Biological Crystallography" above the title, with the real authors
+  ("Thomas R. Schneider and George M. Sheldrick") below it.
+
+  It did no lasting harm *there* only because the DOI resolved and
+  authoritative authors replaced the guess. A paper that resolves no
+  DOI keeps the journal as its author, which is worse than an empty
+  list: it is wrong, it looks deliberate, and it poisons the very
+  author/journal/year lookup the next entry proposes as the rescue.
+
+  Two cheap guards, either of which would have caught this:
+
+    - **Reject a candidate author that equals the journal** we
+      extracted, or that starts with a known journal-title word
+      ("Acta", "Journal of", "Proceedings of", "Nature", "Science").
+    - **Reject a candidate with no given name at all** — real author
+      lines carry initials or forenames; a journal title does not.
+
+  Worth doing even with the title route in place, because the two
+  failures compound: the paper with no DOI is exactly the paper whose
+  authors we most need to be right.
+
 - **Resolve metadata from first author / journal / year when there is
   no DOI.** The natural companion to the pasted-citation work under
   Discovery — `find_doi_by_author_year` already does this and is
