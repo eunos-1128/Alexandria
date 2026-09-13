@@ -44,7 +44,7 @@ OpenAlex key.
 
 ## Background
 
-For a long time I had liked referencer
+Quite some time ago now I had liked John Spray's Referencer:
 
 [https://icculus.org/referencer](https://icculus.org/referencer)
 
