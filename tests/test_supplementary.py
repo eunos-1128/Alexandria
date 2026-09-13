@@ -80,7 +80,7 @@ def test_no_prefix_for_names_we_cannot_decode():
 def _quiet(monkeypatch, doi):
     monkeypatch.setattr(
         importer, "_build_record",
-        lambda p: {"title": "Supporting Information", "authors": [],
+        lambda p, **_kw: {"title": "Supporting Information", "authors": [],
                    "year": 2020, "journal": None, "doi": doi})
     monkeypatch.setattr(
         importer.thumbnail, "make_thumbnail", lambda *a, **k: None)
@@ -137,7 +137,7 @@ def test_the_real_paper_can_still_import_afterwards(
 
     monkeypatch.setattr(
         importer, "_build_record",
-        lambda p: {"title": "Understanding Ring Puckering",
+        lambda p, **_kw: {"title": "Understanding Ring Puckering",
                    "authors": ["A"], "year": 2021, "journal": "JCIM",
                    "doi": "10.1021/acs.jcim.0c01144"})
     rec, status = importer.import_pdf(

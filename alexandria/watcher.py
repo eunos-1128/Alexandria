@@ -50,7 +50,8 @@ class LibraryWatcher:
 
     def __init__(self, db_path, library_root, on_change_cb=None,
                  on_import_start_cb=None, skip_roots=None,
-                 on_sidecar_rejected_cb=None):
+                 on_sidecar_rejected_cb=None,
+                 on_import_progress_cb=None):
         # We take a db_path rather than a sqlite3.Connection because
         # every code path that touches the index runs in its own
         # daemon thread (`_spawn`'d event handlers and the reconcile
@@ -62,6 +63,11 @@ class LibraryWatcher:
         self.root = library_root
         self.on_change = on_change_cb
         self.on_import_start = on_import_start_cb
+        # Called with (basename, message) as an import moves through
+        # its steps. Unlike the callbacks above it is *not* wrapped in
+        # idle_add here: a cold import posts a dozen lines, and the GUI
+        # side already hops to the main thread through its ticker.
+        self.on_import_progress = on_import_progress_cb
         # Called (on the GLib main thread, with the sidecar basename)
         # when a *.alexandria file appears in the library with no
         # matching PDF — e.g. someone emailed a shared sidecar and it
@@ -289,13 +295,20 @@ class LibraryWatcher:
             conn.close()
 
     def _do_import_with_conn(self, conn, path):
+        progress = None
+        if self.on_import_progress:
+            name = os.path.basename(path)
+
+            def progress(message, _n=name):
+                self.on_import_progress(_n, message)
         try:
             # The ghost-merge dispatch lives in importer now, so a
             # reconcile pass gets it too: this branch used to be the
             # only place it happened, and a PDF whose filesystem
             # event was dropped could never be attached afterwards.
             rec, status, new_path = importer.import_pdf_or_attach(
-                conn, path, self.root, suppress=self._suppress_path)
+                conn, path, self.root, suppress=self._suppress_path,
+                on_progress=progress)
         except Exception as e:
             print("[watcher] import failed for {}: {}".format(path, e))
             return

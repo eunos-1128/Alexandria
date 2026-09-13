@@ -55,7 +55,7 @@ def test_refresh_preserves_summary(tmp_path, monkeypatch):
 
     monkeypatch.setattr(
         importer, "_build_record",
-        lambda p: {"title": "T", "authors": ["A"], "year": 2020,
+        lambda p, **_kw: {"title": "T", "authors": ["A"], "year": 2020,
                    "journal": "J", "doi": "10.1/x"})
     monkeypatch.setattr(
         importer.metrics, "fetch_metrics",

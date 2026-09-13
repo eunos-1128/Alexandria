@@ -2157,10 +2157,14 @@ class BrowserWindow(Adw.ApplicationWindow):
         self._import_window_names = []
         self._import_window_timer_id = None
         self._import_count_toast = None
+        # Built on first use and kept: the ticker holds the queue that
+        # stops each milestone being overwritten within 100 ms.
+        self._import_ticker = None
         self.library_watcher = watcher_mod.LibraryWatcher(
             self._db_path, self.library_root,
             on_change_cb=self._on_watcher_change,
             on_import_start_cb=self._on_import_start,
+            on_import_progress_cb=self._on_import_progress,
             on_sidecar_rejected_cb=self._on_sidecar_rejected,
             skip_roots=self._other_catalogue_roots())
         self.library_watcher.start()
@@ -4064,7 +4068,9 @@ class BrowserWindow(Adw.ApplicationWindow):
             if os.path.realpath(src) == os.path.realpath(target):
                 # Already in the library — just (re)import in place.
                 try:
-                    rec, status = importer.import_pdf(conn, target)
+                    rec, status = importer.import_pdf(
+                        conn, target,
+                        on_progress=self._drop_progress(target))
                     results.setdefault(status, []).append((src, target, rec))
                 except Exception as e:
                     results["error"].append((src, target, str(e)))
@@ -4081,7 +4087,8 @@ class BrowserWindow(Adw.ApplicationWindow):
                 results["error"].append((src, target, str(e)))
                 continue
             try:
-                rec, status = importer.import_pdf(conn, target)
+                rec, status = importer.import_pdf(
+                    conn, target, on_progress=self._drop_progress(target))
             except Exception as e:
                 results["error"].append((src, target, str(e)))
                 try: os.remove(target)
@@ -4771,6 +4778,41 @@ class BrowserWindow(Adw.ApplicationWindow):
         self._import_window_names = []
         self._import_count_toast = None
         return False  # don't repeat
+
+    # --- Import progress in the status bar ----------------------------
+
+    def _drop_progress(self, path):
+        """An `on_progress` for a PDF dropped onto the window.
+
+        Same narration as the watcher's, bound to one file — a drop
+        onto the window goes straight to `import_pdf` and never reaches
+        the watcher, so without this the two ways of adding a paper
+        would behave differently for no reason the user could see."""
+        name = os.path.basename(path)
+        return lambda message: self._on_import_progress(name, message)
+
+    def _on_import_progress(self, basename, message):
+        """Narrate an import in the status bar, beneath the toast.
+
+        The toast says *that* a file is importing and then sits there:
+        a cold import shells out to poppler twice and makes up to five
+        network calls, so "Importing x…" can stand unchanged for many
+        seconds with nothing to say whether it is working or wedged.
+        This is the same treatment `Get PDF` got — the difference being
+        that imports arrive in bursts, so the line names the file only
+        when more than one is in flight. Naming it always would double
+        the length of every line for the common case of one drop.
+
+        Called from the watcher's worker thread; the ticker hops to the
+        main loop itself."""
+        if self._import_ticker is None:
+            self._import_ticker = status_ticker.StatusTicker(
+                show=lambda text: GLib.idle_add(self.status.set_text, text),
+                schedule=lambda delay_ms, fn: GLib.timeout_add(delay_ms, fn))
+        active = len(self._import_window_names)
+        if active > 1:
+            message = "{}: {}".format(basename, message)
+        self._import_ticker.post(message)
 
     def _on_close_request(self, _win):
         # Stop the daemon-friendly bits cleanly so they don't keep
@@ -5908,6 +5950,7 @@ class BrowserWindow(Adw.ApplicationWindow):
                 self._db_path, self.library_root,
                 on_change_cb=self._on_watcher_change,
                 on_import_start_cb=self._on_import_start,
+                on_import_progress_cb=self._on_import_progress,
                 on_sidecar_rejected_cb=self._on_sidecar_rejected,
                 skip_roots=self._other_catalogue_roots())
             self.library_watcher.start()

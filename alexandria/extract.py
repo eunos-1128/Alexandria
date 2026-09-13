@@ -1002,7 +1002,7 @@ def drop_pii_artefacts(result, pdf_path=None):
     return result
 
 
-def _doi_by_title(result):
+def _doi_by_title(result, on_progress=None):
     """Last resort when the PDF carries no DOI anywhere: ask what paper
     this title belongs to.
 
@@ -1043,22 +1043,38 @@ def _doi_by_title(result):
             return doi
         doi = _metrics.find_doi_by_title_search(title, year=year)
         if doi:
+            _say(on_progress, "Matched by title: {}".format(doi))
             return doi
         if authors:
             surnames = " ".join(_metrics._surname(a) for a in authors[:4])
+            _say(on_progress, "Asking CrossRef to match the citation")
             doi = _metrics.find_doi_by_citation(
                 "{} {}".format(title, surnames).strip())
             if doi:
+                _say(on_progress, "Matched by citation: {}".format(doi))
                 return doi
     except Exception:
         pass          # a paper with no DOI is still worth importing
     return None
 
 
-def _enrich(result, pdf_path):
+def _say(on_progress, message):
+    """Narrate one step, if a caller is listening. Never raises: the
+    callback belongs to the GUI, and an extraction that failed because
+    a status bar misbehaved would be a poor trade."""
+    if not on_progress:
+        return
+    try:
+        on_progress(message)
+    except Exception:
+        pass
+
+
+def _enrich(result, pdf_path, on_progress=None):
     """If metadata is incomplete, scrape page 1 for a DOI and overlay
     CrossRef data. Also detects SI documents and re-routes them through
     the parent paper's DOI."""
+    _say(on_progress, "Reading the first page")
     text = _first_page_text(pdf_path)
     is_si = _is_supplementary(pdf_path, text)
     if is_si:
@@ -1088,6 +1104,7 @@ def _enrich(result, pdf_path):
         # DOI that wraps at one of its own hyphens gets stitched to
         # whatever word sits beside it ("…-070924-Microbial"), and a
         # confidently wrong DOI stops every later step from running.
+        _say(on_progress, "Looking for a DOI in the text")
         doi = _scan_doi_in_pages(pdf_path, max_pages=2)
         if not doi:
             doi = _scrape_doi(text)
@@ -1109,12 +1126,16 @@ def _enrich(result, pdf_path):
         if not doi:
             # Some journals (e.g. Science) print the DOI on the references
             # page rather than page 1. Cast a wider net before giving up.
+            _say(on_progress, "Still no DOI — scanning further pages")
             doi = _scan_doi_in_pages(pdf_path, max_pages=4)
         if not doi:
-            doi = _doi_by_title(result)
+            _say(on_progress, "No DOI in the file — searching by title")
+            doi = _doi_by_title(result, on_progress)
         if doi:
             result["doi"] = doi
 
+    if result.get("doi"):
+        _say(on_progress, "Asking CrossRef about {}".format(result["doi"]))
     cr = _crossref_lookup(result["doi"]) if result.get("doi") else None
     if cr:
         # Title and authors: only fill if missing (PDF metadata is
@@ -1150,19 +1171,23 @@ def _enrich(result, pdf_path):
     return drop_pii_artefacts(result, pdf_path)
 
 
-def extract_from_pdf(pdf_path):
+def extract_from_pdf(pdf_path, on_progress=None):
     """Return a dict with keys: title, authors, year, doi, journal, raw.
-    Any field may be None / empty. Never raises on a malformed PDF."""
+    Any field may be None / empty. Never raises on a malformed PDF.
+
+    `on_progress(message)` narrates the slow parts — the poppler text
+    scans and the DOI lookups — for a caller with a status bar to
+    fill. Optional, and never allowed to break an extraction."""
     out = {"title": None, "authors": [], "year": None,
            "doi": None, "journal": None, "raw": {}}
 
     if _have_pdfx():
         result = _extract_from_pdfx(pdf_path)
         if result is not None:
-            return _enrich(result, pdf_path)
+            return _enrich(result, pdf_path, on_progress)
 
     if not HAVE_PYPDF:
-        return _enrich(out, pdf_path)
+        return _enrich(out, pdf_path, on_progress)
     try:
         reader = PdfReader(pdf_path)
         info = reader.metadata or {}
@@ -1189,4 +1214,4 @@ def extract_from_pdf(pdf_path):
     cd = raw.get("/CreationDate") or raw.get("CreationDate") or ""
     out["year"] = _parse_pdf_date(cd)
 
-    return _enrich(out, pdf_path)
+    return _enrich(out, pdf_path, on_progress)

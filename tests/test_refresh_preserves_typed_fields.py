@@ -68,7 +68,7 @@ def paper(tmp_path, monkeypatch):
 
 def test_extraction_finding_nothing_keeps_every_typed_field(paper, monkeypatch):
     conn, pdf, sc = paper
-    monkeypatch.setattr(importer, "_build_record", lambda p: {})
+    monkeypatch.setattr(importer, "_build_record", lambda p, **_kw: {})
 
     rec, status = importer.refresh_pdf(conn, pdf)
 
@@ -88,7 +88,7 @@ def test_every_shape_of_empty_counts_as_nothing(paper, monkeypatch, blank):
     """Extractors signal "not found" in several ways."""
     conn, pdf, sc = paper
     monkeypatch.setattr(importer, "_build_record",
-                        lambda p: {"doi": blank, "year": blank})
+                        lambda p, **_kw: {"doi": blank, "year": blank})
 
     importer.refresh_pdf(conn, pdf)
 
@@ -103,7 +103,7 @@ def test_a_real_extraction_still_wins(paper, monkeypatch):
     conn, pdf, sc = paper
     monkeypatch.setattr(
         importer, "_build_record",
-        lambda p: {"title": "A better title from the PDF",
+        lambda p, **_kw: {"title": "A better title from the PDF",
                    "doi": "10.1006/jmbi.1995.9999"})
 
     importer.refresh_pdf(conn, pdf)
@@ -119,7 +119,7 @@ def test_preserved_doi_drives_the_openalex_enrichment(paper, monkeypatch):
     the enrichment pass that follows it in refresh_pdf now runs on
     the typed value."""
     conn, pdf, sc = paper
-    monkeypatch.setattr(importer, "_build_record", lambda p: {})
+    monkeypatch.setattr(importer, "_build_record", lambda p, **_kw: {})
     seen = []
     monkeypatch.setattr(
         importer.metrics, "fetch_metrics",

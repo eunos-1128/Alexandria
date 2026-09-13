@@ -22,7 +22,7 @@ from alexandria import importer, index, sidecar
 
 
 def _quiet(monkeypatch, extract_calls, delay=0.3):
-    def slow_build(pdf_path):
+    def slow_build(pdf_path, **_kw):
         extract_calls.append(pdf_path)
         time.sleep(delay)          # stand-in for pdfx's seconds
         return {"title": "T", "authors": ["A"], "year": 2020,
@@ -150,7 +150,7 @@ def test_extraction_is_serialised(tmp_path, monkeypatch):
     concurrent = {"now": 0, "peak": 0}
     lock = threading.Lock()
 
-    def watching_build(pdf_path):
+    def watching_build(pdf_path, **_kw):
         with lock:
             concurrent["now"] += 1
             concurrent["peak"] = max(concurrent["peak"],

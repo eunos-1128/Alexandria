@@ -21,7 +21,7 @@ from alexandria import importer, index, sidecar
 def _quiet_import_deps(monkeypatch, doi):
     monkeypatch.setattr(
         importer, "_build_record",
-        lambda p: {"title": "T", "authors": ["A"], "year": 2020,
+        lambda p, **_kw: {"title": "T", "authors": ["A"], "year": 2020,
                    "journal": "J", "doi": doi})
     monkeypatch.setattr(
         importer.metrics, "fetch_metrics",

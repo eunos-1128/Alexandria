@@ -334,7 +334,7 @@ def _enrich_from_openalex(rec, pdf_path):
             "doi_title": oa_title,
             "doi_year": oa_year,
         }
-    if oa_title:
+    if oa_title and not _same_title_worse_spacing(oa_title, pdf_title):
         rec["title"] = oa_title
     if oa_year:
         rec["year"] = oa_year
@@ -491,6 +491,29 @@ def conflict_from_refresh(rec, oa_title, oa_year, pdf_path=None):
     return out
 
 
+def _same_title_worse_spacing(oa_title, pdf_title):
+    """True when the online title is the *same* title as the PDF's but
+    with spaces missing.
+
+    OpenAlex metadata otherwise wins, and rightly — a PDF's own title
+    is frequently page furniture. But it can lose a space where the
+    journal italicised a word: `10.1107/s0907444902011678` is stored as
+    "Substructure solution withSHELXD", which is the same title as the
+    paper prints, only broken. Adopting it means every citation
+    Alexandria produces for that paper carries the defect, and the
+    paper becomes unfindable by its own name.
+
+    Deliberately narrow: identical once spaces and punctuation are
+    dropped, *and* the PDF's version has more spaces. Any real
+    disagreement is left to the existing mismatch machinery."""
+    if not oa_title or not pdf_title:
+        return False
+    if metrics.normalised_title(oa_title) != metrics.normalised_title(
+            pdf_title):
+        return False
+    return oa_title.count(" ") < pdf_title.count(" ")
+
+
 def _openalex_record_matches(pdf_title, pdf_year, oa_title, oa_year):
     """True if the OpenAlex Work's metadata is consistent with the
     PDF's. Used by `import_pdf` to detect cross-contaminated OpenAlex
@@ -550,10 +573,10 @@ def _is_blank(value):
     return False
 
 
-def _build_record(pdf_path):
+def _build_record(pdf_path, on_progress=None):
     """Run the full extraction pipeline and return a fresh record dict."""
     rec = sidecar.new_record(pdf_path)
-    extracted = extract.extract_from_pdf(pdf_path)
+    extracted = extract.extract_from_pdf(pdf_path, on_progress=on_progress)
     rec["title"] = extracted["title"] or os.path.splitext(
         os.path.basename(pdf_path))[0]
     rec["authors"] = extracted["authors"]
@@ -754,11 +777,30 @@ def _release_inflight(pdf_path, ev):
     ev.set()
 
 
-def import_pdf(conn, pdf_path):
+def _say(on_progress, message):
+    """Post one line of narration, if anyone is listening.
+
+    Exceptions are swallowed for the same reason `pdf_fetch._report`
+    swallows them: the callback belongs to the GUI, and an import that
+    failed because a status bar misbehaved would be a poor trade."""
+    if not on_progress:
+        return
+    try:
+        on_progress(message)
+    except Exception:
+        pass
+
+
+def import_pdf(conn, pdf_path, on_progress=None):
     """Make sure pdf_path has sidecar + thumbnail, and upsert the index row.
 
     For new PDFs (no sidecar yet), check for duplicates by DOI or SHA-256
     against the existing index and skip them.
+
+    `on_progress(message)` is called with a human-readable line at each
+    step worth waiting for. A cold import makes up to five network
+    calls and shells out to poppler twice; with no narration the window
+    shows one "Importing x…" toast for all of it.
 
     Returns:
         (rec, status) where status is 'new', 'existing', or 'duplicate'.
@@ -767,12 +809,12 @@ def import_pdf(conn, pdf_path):
     """
     ev = _await_inflight(pdf_path)
     try:
-        return _import_pdf_locked(conn, pdf_path)
+        return _import_pdf_locked(conn, pdf_path, on_progress)
     finally:
         _release_inflight(pdf_path, ev)
 
 
-def _import_pdf_locked(conn, pdf_path):
+def _import_pdf_locked(conn, pdf_path, on_progress=None):
     sc_path = sidecar.sidecar_path_for(pdf_path)
     th_path = sidecar.thumb_path_for(pdf_path)
 
@@ -806,6 +848,7 @@ def _import_pdf_locked(conn, pdf_path):
         return rec, "existing"
 
     # New PDF: hash first so we can detect renames cheaply.
+    _say(on_progress, "Checking whether it is already here")
     sha = _sha256(pdf_path)
     by_hash = index.find_duplicate(conn, sha256=sha, exclude_path=pdf_path)
     if by_hash and not os.path.isfile(by_hash["pdf_path"]):
@@ -817,12 +860,18 @@ def _import_pdf_locked(conn, pdf_path):
         # Byte-identical copy of a PDF already in the library and the
         # original is still on disk. Skip _build_record's poppler
         # extraction — we already know the metadata.
+        _say(on_progress, "Already in the library as {}".format(
+            os.path.basename(by_hash.get("pdf_path") or "another file")))
         return by_hash, "duplicate"
 
     # No hash match: extract metadata and dedup by DOI.
     with _extract_gate:
-        rec = _build_record(pdf_path)
+        rec = _build_record(pdf_path, on_progress=on_progress)
     rec["sha256"] = sha
+    if rec.get("doi"):
+        _say(on_progress, "DOI {}".format(rec["doi"]))
+    else:
+        _say(on_progress, "No DOI found in the PDF")
 
     # Supporting information is a supplement, not the paper. Its text
     # carries the parent's DOI, so left alone it imports *as* that
@@ -844,6 +893,8 @@ def _import_pdf_locked(conn, pdf_path):
     dup = index.find_duplicate(conn, doi=rec.get("doi"),
                                exclude_path=pdf_path)
     if dup:
+        _say(on_progress, "Same DOI as {}".format(
+            os.path.basename(dup.get("pdf_path") or "a paper already here")))
         return dup, "duplicate"
 
     # No DOI in the PDF text (common for pre-DOI-era papers) means
@@ -864,28 +915,39 @@ def _import_pdf_locked(conn, pdf_path):
     # the PDF disagrees — the PDF's own title is often page furniture
     # ("Chem. Pharm. Bull. 74(6): 513-528"). A disagreement is
     # recorded for the card to flag, not used to refuse the data.
+    if rec.get("doi"):
+        _say(on_progress, "Asking OpenAlex about {}".format(rec["doi"]))
     _enrich_from_openalex(rec, pdf_path)
+    if rec.get("citations") is not None:
+        _say(on_progress, "OpenAlex: {} citations".format(rec["citations"]))
 
     # Preprint → published-version lookup. One extra OpenAlex call,
     # only for preprint DOIs.
     if metrics.is_preprint_doi(rec.get("doi")):
+        _say(on_progress, "Preprint — looking for the published version")
         pv = metrics.find_published_version(
             rec.get("title"), rec.get("authors") or [], rec["doi"])
         if pv:
             rec["published_version"] = pv
+            _say(on_progress, "Published as {}".format(
+                pv.get("doi") or "a journal article"))
 
     # JATS full text (Europe PMC), best-effort: stores
     # <pdf>.jats.xml beside the PDF when the paper is in the PMC OA
     # subset, and records the attempt in the sidecar either way so
     # the backfill knows not to repeat it.
     if rec.get("doi"):
+        _say(on_progress, "Looking for the full text at Europe PMC")
         try:
             rec["jats"] = jats.fetch_and_store(pdf_path, rec["doi"])
+            if (rec.get("jats") or {}).get("status") == "stored":
+                _say(on_progress, "Stored the JATS full text")
         except Exception as e:
             print("[importer] JATS fetch failed for {}: {}".format(
                 rec["doi"], e))
 
     sidecar.write(sc_path, rec)
+    _say(on_progress, "Drawing the thumbnail")
     thumbnail.make_thumbnail(pdf_path, th_path, title=rec.get("title"))
     mtime = os.path.getmtime(sc_path)
     index.upsert(conn, pdf_path, sc_path,
@@ -1028,7 +1090,8 @@ def rename_pdf(conn, old_path, new_path):
     index.remove(conn, old_path)
 
 
-def import_pdf_or_attach(conn, path, library_root, suppress=None):
+def import_pdf_or_attach(conn, path, library_root, suppress=None,
+                         on_progress=None):
     """`import_pdf`, plus: a duplicate that turns out to be a BibTeX
     ghost is attached to it rather than left on the floor.
 
@@ -1053,10 +1116,12 @@ def import_pdf_or_attach(conn, path, library_root, suppress=None):
     # import_pdf, so the two would import each other.
     from . import bibtex_import
 
-    rec, status = import_pdf(conn, path)
+    rec, status = import_pdf(conn, path, on_progress=on_progress)
     if not (status == "duplicate" and rec
             and sidecar.is_ghost_path(rec.get("pdf_path") or "")):
         return rec, status, None
+
+    _say(on_progress, "Matches a BibTeX entry — attaching the PDF to it")
 
     ghost_pdf = rec.get("pdf_path") or ""
     if suppress is not None:

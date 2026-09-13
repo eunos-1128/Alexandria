@@ -159,3 +159,22 @@ def test_crossref_is_not_asked_without_surnames(monkeypatch):
                         lambda *a, **k: pytest.fail("should not have asked"))
 
     assert extract._doi_by_title({"title": TITLE, "year": 2002}) is None
+
+
+def test_a_title_that_only_lost_a_space_does_not_win(monkeypatch):
+    """OpenAlex metadata otherwise wins — a PDF's own title is often
+    page furniture — but not when the online one is the same title with
+    a space missing. Adopting it would put the defect into every
+    citation and make the paper unfindable by its own name."""
+    from alexandria import importer
+
+    assert importer._same_title_worse_spacing(
+        "Substructure solution withSHELXD", TITLE) is True
+    # A genuinely different title is not this case, and is left to the
+    # existing mismatch machinery.
+    assert importer._same_title_worse_spacing(
+        "A short history of SHELX", TITLE) is False
+    # Nor is the reverse: if the PDF is the broken one, prefer online.
+    assert importer._same_title_worse_spacing(
+        TITLE, "Substructure solution withSHELXD") is False
+    assert importer._same_title_worse_spacing(None, TITLE) is False

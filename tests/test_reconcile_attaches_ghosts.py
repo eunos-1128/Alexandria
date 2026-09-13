@@ -55,7 +55,7 @@ def library(tmp_path, monkeypatch):
     with open(src, "wb") as fh:
         fh.write(b"%PDF-1.4 junk")
 
-    def fake_import(conn_, pdf_path):
+    def fake_import(conn_, pdf_path, **_kw):
         """What import_pdf does here: the DOI resolves to a paper the
         index already has — the ghost — so it reports a duplicate."""
         if os.path.abspath(pdf_path) == os.path.abspath(src):
@@ -133,7 +133,7 @@ def test_a_plain_duplicate_is_still_just_a_duplicate(library, monkeypatch):
     index.upsert(conn, real, sc, None, rec, os.path.getmtime(sc))
 
     monkeypatch.setattr(importer, "import_pdf",
-                        lambda c, p: (dict(rec), "duplicate"))
+                        lambda c, p, **_kw: (dict(rec), "duplicate"))
 
     out_rec, status, new_path = importer.import_pdf_or_attach(
         conn, real, root)

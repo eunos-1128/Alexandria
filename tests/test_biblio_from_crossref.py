@@ -101,7 +101,7 @@ def test_the_record_keeps_what_extraction_resolved(monkeypatch, tmp_path):
     pdf = tmp_path / "p.pdf"
     pdf.write_bytes(b"%PDF-1.4 x")
     monkeypatch.setattr(importer.extract, "extract_from_pdf",
-                        lambda _p: extracted())
+                        lambda _p, **_kw: extracted())
     monkeypatch.setattr(importer.metrics, "biblio_from_raw",
                         lambda _raw: {})
 
@@ -119,7 +119,7 @@ def test_prism_still_wins_where_the_pdf_has_it(monkeypatch, tmp_path):
     pdf = tmp_path / "p.pdf"
     pdf.write_bytes(b"%PDF-1.4 x")
     monkeypatch.setattr(importer.extract, "extract_from_pdf",
-                        lambda _p: extracted())
+                        lambda _p, **_kw: extracted())
     monkeypatch.setattr(importer.metrics, "biblio_from_raw",
                         lambda _raw: {"volume": "99", "pages": "1-2"})
 
