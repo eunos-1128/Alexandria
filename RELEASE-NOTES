@@ -1,3 +1,132 @@
+  Release Notes for 0.6.0
+
+ o FEATURE: One authors database and one author-photo store, shared
+            by every catalogue. The trail you follow, the photographs
+            you attach and the cached author data were previously per
+            library, so the same person was a stranger in your other
+            catalogue. Existing photos are migrated at startup
+
+ o FEATURE: Funding: Papers carry the funders that OpenAlex reports,
+            and UK-funded work is matched against UKRI's Gateway to
+            Research: the grants an author holds as PI or Co-I, with
+            amounts and dates, and a chip on the card naming the
+            award that paid for that paper
+
+ o FEATURE: Preprints in Discover, searched at Europe PMC. OpenAlex
+            is often late on preprints - Europe PMC carries bioRxiv
+            and medRxiv directly
+
+ o FEATURE: Preprint PDFs download from bioRxiv and medRxiv
+
+ o FEATURE: "Get PDF" now says what it is doing
+
+ o FEATURE: An import says what it is doing, too
+
+ o FEATURE: A paper that prints no DOI anywhere can still be
+            identified, from its title. Papers from before DOIs were
+            printed on the page used to import bare - now we
+            attempt to handle them
+
+ o FEATURE: Copy one paper as BibTeX or RIS, from its own card.
+            Both formats could always render a single paper; the
+            only way to reach them was a whole-library export behind
+            a save dialog
+
+ o FEATURE: Sort the author list: by surname (filed under the
+            surname, not the given name), by when you added them, by
+            when they first published, or your own drag order. The
+            career-start year is cached, and backfilled the first
+            time the order is used
+
+ o FEATURE: A keyboard-shortcuts window, on Ctrl+? and in the menu.
+            Alexandria binds two dozen keys — seventeen in the viewer
+            alone — and told nobody
+
+ o FEATURE: Press and hold opens the context menus, everywhere a
+            right-click does. On a laptop trackpad a two-finger tap
+            is available but not habitual, and on a touchscreen there
+            was no way in at all: one of these menus went unnoticed
+            by the person who wrote it for exactly that reason
+
+ o FEATURE: Author photographs appear in the main-window author
+            popover, not only in the Authors window — so the effort
+            of finding one shows up where the time is spent. A photo
+            exists only because somebody went and found it, so most
+            rows stay deliberately empty and a face is a scanning aid
+
+ o FEATURE: Highlights and their comments are visible in the
+            metadata editor, read-only. They are made by selecting
+            text in the viewer and that is where they are edited;
+            this answers the question the editor could not, which is
+            whether a paper carries any marks at all
+
+ o FEATURE: The viewer opens with its sidebar showing
+
+ o FEATURE: A starter config.json is written on first run. Nothing
+            required it, which was the problem: a new user had no
+            file to open and no way to discover the two settings that
+            change what the app can do — a contact address (which
+            Unpaywall requires outright) and an OpenAlex key
+
+ o CHANGE:  README updated
+
+ o CHANGE:  citeproc-py 0.11.1 or newer is now required. Previously
+            there were punctuation defects.
+            Thanks for the update citeproc-py Dev Team!
+
+ o BUG-FIX: Chicago style crashed on any paper with a page range.
+            Now fixed
+
+ o BUG-FIX: Every import offering a single candidate DOI failed,
+            with "cannot access local variable 'choice'". Introduced
+            in 0.5.0's volume/issue/pages work. Ooops
+
+ o BUG-FIX: Refreshing a paper no longer destroys what it cannot
+            re-derive.
+
+ o BUG-FIX: A PDF that duplicates a BibTeX ghost is attached to it
+            from every import path, not only when the file watcher
+            happened to see it arrive. A missed filesystem event
+            used to orphan the file permanently. Now fixed
+
+ o BUG-FIX: Dropping several PDFs at once no longer freezes the
+            window. The drop and the watcher imported the same files
+            in parallel and contended for the database; seven files
+            froze the window for the full 30-second timeout.
+            Nasty UX fixed.
+
+ o BUG-FIX: A PDF dropped onto the window raises the same
+            "Importing…" toast as one dropped into the library
+            folder
+
+ o BUG-FIX: DOIs that wrap across a line break, or that run into the
+            word after them, are read correctly. Seven papers had
+            taken the wrong metadata from a DOI ending "-115647"
+            where the page reads "-115647." across a break
+
+ o BUG-FIX: A PDF whose publisher misprinted its own DOI is accepted
+            against the right BibTeX entry rather than refused
+
+ o BUG-FIX: OpenAlex rejecting a request for want of a key is no
+            longer indistinguishable from "no such paper". Both
+            returned nothing at all, so an unauthenticated
+            Alexandria would have reported every paper in the world
+            as unknown
+
+ o BUG-FIX: The viewer's contents panel navigates, and reference
+            popovers work, on PDFs with UTF-16 named destinations —
+            Elsevier's among them
+
+ o BUG-FIX: Numbered bibliography styles (Vancouver, Nature) put a
+            space after the number. "[1]Keegan" was a column the
+            renderer draws and plain text cannot
+
+ o BUG-FIX: The "rename" and "filter" icons are bundled, so they
+            are now properly rendered rather than broken-image
+            squares
+
+-----
+
   Release Notes for 0.5.0
 
  o FEATURE: "Cited most often by" on an author's page: who reads

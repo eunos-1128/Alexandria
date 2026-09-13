@@ -60,6 +60,42 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.6.0" date="2026-09-13">
+      <url type="details">https://github.com/pemsley/Alexandria/blob/main/RELEASE-NOTES</url>
+      <description>
+        <p>
+          Authors and their photographs are shared across
+          catalogues, funding is tracked, preprints are searchable,
+          and the long waits now say what they are doing.
+        </p>
+        <ul>
+          <li>One authors database and one author-photo store for
+            every catalogue — the same person is no longer a
+            stranger in your other library</li>
+          <li>Funders on papers, and UKRI Gateway to Research
+            grants an author holds as PI or Co-I</li>
+          <li>Preprints in Discover, searched at Europe PMC, and
+            preprint PDFs download from bioRxiv and medRxiv</li>
+          <li>"Get PDF" and importing both narrate what they are
+            doing instead of sitting on one line for half a
+            minute</li>
+          <li>A paper that prints no DOI anywhere can still be
+            identified, from its title</li>
+          <li>Copy one paper as BibTeX or RIS from its own card</li>
+          <li>Sort the author list by surname, by when you added
+            them, or by when they first published</li>
+          <li>A keyboard-shortcuts window, and press-and-hold now
+            opens every context menu a right-click does</li>
+          <li>Highlights and their comments are visible in the
+            metadata editor</li>
+          <li>Dropping several PDFs at once no longer freezes the
+            window, and a PDF that duplicates a BibTeX entry is
+            attached to it however it arrived</li>
+          <li>Citations no longer crash on a page range, and
+            numbered styles put a space after the number</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.5.0" date="2026-09-05">
       <url type="details">https://github.com/pemsley/Alexandria/blob/main/RELEASE-NOTES</url>
       <description>
