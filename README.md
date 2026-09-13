@@ -160,6 +160,43 @@ identity instead of inheriting Python's:
 Note that `make install` also installs a `.desktop` file and an XDG
 icon, which do nothing on macOS but are harmless.
 
+## Configuration
+
+On first run Alexandria writes a starter config file to
+`$HOME/.config/Alexandria/config.json`:
+
+    {
+      "catalogues": [
+        { "name": "default", "library_root": "/home/you/Documents/Alexandria" }
+      ],
+      "current_catalogue": "default",
+      "contact_email": "",
+      "openalex_api_key": ""
+    }
+
+Everything works with both of those left empty, but neither is
+decoration:
+
+**`contact_email`** is your own address, and it is what the metadata
+services ask for so they can contact you about a misbehaving client.
+OpenAlex and CrossRef give politer rate limits to requests that carry
+one — without it you share the anonymous pool, which matters most when
+importing a folder of papers. **Unpaywall refuses to answer at all**
+without an address, so until you set one, **Get PDF** quietly searches
+one source fewer.
+
+**`openalex_api_key`** is free from
+[openalex.org](https://openalex.org/) and gives you a private daily
+request budget instead of the shared one. Author pages, citation
+counts, Discover and the reference popover all spend it. Without a key
+you are not locked out, but on a large library you will meet the
+common pool's rate limit.
+
+Both can also be set in **Preferences → Online services** rather than
+by editing the file, and the file is the same file. The library root
+can be overridden for one run with the `ALEXANDRIA_LIBRARY`
+environment variable.
+
 ## Usage
 
 Upon opening Alexandria, it will detect PDF files in

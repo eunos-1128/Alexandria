@@ -30,6 +30,49 @@ def _default_library():
     return os.path.join(docs, "Alexandria")
 
 
+def ensure_config_file(path=DEFAULT_PATH):
+    """Write a starter `config.json` if there is none. Returns True when
+    one was created.
+
+    Nothing needs the file — `load` defaults everything in memory and
+    only writes on the first explicit change — which is exactly the
+    problem it solves. Measured on a genuine first run (empty XDG
+    directories, 2026-09-13): Alexandria starts, watches, imports,
+    enriches, and never creates a config file at all. So a new user has
+    nothing to open, and no way to discover the two settings that
+    change what the app can do:
+
+      * `contact_email` — OpenAlex and CrossRef ask for one and give
+        politer rate limits in return, and **Unpaywall refuses to
+        answer without it**, so "Get PDF" silently consults one fewer
+        source until it is set.
+      * `openalex_api_key` — a private request budget instead of the
+        shared common pool.
+
+    Both are written empty rather than omitted: JSON has no comments,
+    so the keys themselves are the documentation. The library root goes
+    in as a catalogue entry because that is the shape the app writes,
+    and a user copying it will get a working second catalogue.
+
+    Never overwrites: an existing file is left exactly as it is, even
+    an empty or corrupt one — someone else's config is not ours to
+    repair behind their back."""
+    if os.path.exists(path):
+        return False
+    starter = {
+        "catalogues": [{"name": "default",
+                        "library_root": _default_library()}],
+        "current_catalogue": "default",
+        "contact_email": "",
+        "openalex_api_key": "",
+    }
+    try:
+        save(starter, path)
+    except OSError:
+        return False
+    return True
+
+
 def load(path=DEFAULT_PATH):
     try:
         with open(path, "r", encoding="utf-8") as f:

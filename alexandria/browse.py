@@ -6111,6 +6111,19 @@ def main(argv=None):
     # regardless of the desktop colour-scheme preference.
     force_light = "--light" in argv[1:]
 
+    # Before anything reads preferences: put a starter config.json on
+    # disk if there is none, so the settings that matter are visible to
+    # someone who has never opened Preferences. See
+    # prefs.ensure_config_file — a first run otherwise leaves no config
+    # file at all.
+    try:
+        if prefs.ensure_config_file():
+            print("[prefs] wrote a starter config at {}".format(
+                prefs.DEFAULT_PATH))
+    except Exception as e:
+        print("[prefs] could not write a starter config:", e,
+              file=sys.stderr)
+
     # Authenticate OpenAlex with the user's free API key (from prefs;
     # the env var, if set, wins inside metrics). Without a key OpenAlex
     # throttles hard against the shared common quota — the source of the
