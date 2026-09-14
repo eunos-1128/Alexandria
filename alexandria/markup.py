@@ -239,6 +239,14 @@ def summary_attribution(summary):
 # nested lists) is left as literal text rather than half-rendered:
 # a summary is a few paragraphs, and a wrong tag is worse than a
 # visible asterisk.
+# `***both***` must be matched before `**bold**`, or the bold rule
+# consumes two of the three stars and leaves the third to the italic
+# rule, which then closes across the bold span:
+# `<b><i>Campylobacter concisus</b></i>` — interleaved rather than
+# nested, which Pango rejects outright. One species name in italics
+# inside a bold phrase was enough to flatten a whole summary back to
+# literal text.
+_MD_BOLD_ITALIC_RE = re.compile(r"\*\*\*(?=\S)(.+?)(?<=\S)\*\*\*", re.S)
 _MD_BOLD_RE = re.compile(r"\*\*(?=\S)(.+?)(?<=\S)\*\*", re.S)
 _MD_ITALIC_RE = re.compile(
     r"(?<![\w*])[*_](?=\S)([^*_\n]+?)(?<=\S)[*_](?![\w*])")
@@ -254,12 +262,19 @@ def markdown_to_pango(text):
 
     Escaping happens first, so a stray `<script>` in the source can
     never become a tag; the markers we act on survive escaping
-    untouched. Output that Pango still rejects degrades to fully
-    escaped plain text — never a crash, never a stray tag."""
+    untouched.
+
+    **Degradation is per line.** A line Pango rejects is kept as its
+    own escaped text and the rest of the summary still renders. It
+    used to be all-or-nothing across the whole string, so a single
+    `***species***` — one malformed span in forty lines — showed the
+    reader raw Markdown for the entire summary. Never a crash, never a
+    stray tag, and never more literal text than the fault deserves."""
     if not text:
         return ""
     out_lines = []
-    for line in GLib.markup_escape_text(text).split("\n"):
+    for raw in text.split("\n"):
+        line = GLib.markup_escape_text(raw)
         heading = _MD_HEADING_RE.match(line)
         if heading:
             out_lines.append("<b>{}</b>".format(heading.group(1)))
@@ -268,9 +283,15 @@ def markdown_to_pango(text):
         # opening of an emphasis span.
         line = _MD_BULLET_RE.sub(r"\1• ", line)
         line = _MD_CODE_RE.sub(r"<tt>\1</tt>", line)
+        line = _MD_BOLD_ITALIC_RE.sub(r"<b><i>\1</i></b>", line)
         line = _MD_BOLD_RE.sub(r"<b>\1</b>", line)
         line = _MD_ITALIC_RE.sub(r"<i>\1</i>", line)
-        out_lines.append(line)
+        # A span opened on one line and closed on the next is not
+        # something this subset supports, so each line has to stand
+        # on its own anyway — which is what makes per-line fallback
+        # correct rather than merely convenient.
+        out_lines.append(line if _markup_parses(line)
+                         else GLib.markup_escape_text(raw))
     result = "\n".join(out_lines)
     if not _markup_parses(result):
         return GLib.markup_escape_text(text)
