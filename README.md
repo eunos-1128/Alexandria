@@ -188,9 +188,11 @@ one source fewer.
 **`openalex_api_key`** is free from
 [openalex.org](https://openalex.org/) and gives you a private daily
 request budget instead of the shared one. Author pages, citation
-counts, Discover and the reference popover all spend it. Without a key
-you are not locked out, but on a large library you will meet the
-common pool's rate limit.
+counts, most of Discover and the reference popover all spend it — but
+not Discover's **Preprints** tab, which asks Europe PMC, or **By PDB**,
+which asks PDBe; neither needs a key. Without one you are not locked
+out, but on a large library you will meet the common pool's rate
+limit.
 
 Both can also be set in **Preferences → Online services** rather than
 by editing the file, and the file is the same file. The library root

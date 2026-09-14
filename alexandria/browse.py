@@ -1961,7 +1961,13 @@ class BrowserWindow(Adw.ApplicationWindow):
                                       catalogues_section)
         discover_section = Gio.Menu()
         discover_section.append("Authors…", "win.authors")
-        discover_section.append("Discover (OpenAlex)…", "win.discover")
+        # Not "(OpenAlex)": the window has five tabs and two of them
+        # go elsewhere — By PDB asks PDBe, Preprints asks Europe PMC,
+        # and the preprint tab exists precisely *because* OpenAlex is
+        # late on preprints. Naming one source in the menu promises
+        # something the window does not do, and would need editing
+        # again with every source added.
+        discover_section.append("Discover…", "win.discover")
         discover_section.append("Subscriptions…", "win.subscriptions")
         hamburger_menu.append_section(None, discover_section)
         tools_section = Gio.Menu()
