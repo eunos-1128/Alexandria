@@ -1959,6 +1959,41 @@ Pending features, roughly grouped. Newest at the top of each section.
   alongside Frequent collaborators — does not exist. Original
   entry:
 
+- **Find within an author's works — highlight, do not filter.** Asked
+  for 2026-09-16. The works list is up to 50 rows
+  (`_cached_or_fetch_works`, `limit=50`) and there is no way to look
+  for one inside it except scrolling.
+
+  **The distinction is the whole request.** The library's own search
+  filters: type, and non-matching cards disappear. That is right
+  there, because the library has no meaningful order to lose. An
+  author's works list *is* an order — most recent first, or most cited
+  first — and that order is the information. A reader scanning for
+  "cryo-EM" wants to know *where* those papers fall in the career, and
+  whether they are the highly-cited ones. Filtering answers "which",
+  and destroys "where". A browser's Ctrl+F is the right model, not the
+  library search bar.
+
+  **Sketch.** A small entry above the list, find-as-you-type. Matches
+  get a yellow background span in the title and author labels — the
+  same `#fff200` the comment chip and the viewer's highlight already
+  use (`browse.py:981`, `viewer._HIGHLIGHT_FILL`), so the app keeps one
+  yellow meaning "found". The labels are `Gtk.Label`s set from markup
+  already, so this is a wrap around `safe_pango_markup` rather than new
+  machinery. Worth showing a count ("7 of 50") and offering
+  next/previous to scroll between hits, since with 50 rows a match can
+  easily be off-screen.
+
+  **Decide:** whether it searches the visible fields only (title,
+  authors, journal, year) or also the abstract, which is fetched but
+  not shown. Searching text the reader cannot see produces matches
+  that look like false positives — probably visible fields only, with
+  the abstract a later opt-in.
+
+  Related: the same argument applies to the reference list in the
+  viewer, and to "Cited most often by". If this lands well it is a
+  small reusable helper, not a one-off.
+
 - **"Papers in the library" section in the author page.** Asked for
   2026-09-02: on an author's page, show which of their papers you
   already hold — as a section alongside "Frequent collaborators" and
