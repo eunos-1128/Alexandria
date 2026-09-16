@@ -436,3 +436,91 @@
 
  o BUG-FIX: Sidecars that appear from outside the application are
             reported rather than imported blindly
+
+-----
+
+  Release Notes for 0.1.0
+
+  (Written 2026-09-17 from the `pdf-organizer` repository, which holds
+  the project's first three weeks — 26 April to 17 May 2026. 0.1.0 was
+  prepared at the time: "pre-v0.1.0: lock on-disk format", "README and
+  Makefile polish for v0.1.0", three Sharing items explicitly deferred
+  from it. It was then never tagged and never written up, and the
+  version in pyproject.toml was relabelled down to 0.0.1. These notes
+  record what the first release was.)
+
+ o FEATURE: The premise, which nothing since has changed: a plain
+            directory of PDFs. Each paper gets a sidecar JSON file
+            beside it and a thumbnail; an SQLite index is built from
+            the sidecars for searching. Drop a file into the folder
+            and a watcher imports it. Nothing is uploaded anywhere
+
+ o FEATURE: Metadata without typing: title, authors, year, DOI and
+            journal from the PDF's own XMP, from CrossRef, from
+            OpenAlex, or from the text of page 1 — and from the
+            filename where a publisher encodes the DOI in it
+
+ o FEATURE: A built-in PDF viewer, with text selection delegated to
+            Poppler, highlights in the margin and comments attached
+            to them. Both are stored in the sidecar, so they travel
+            with the paper rather than living in a database
+
+ o FEATURE: Clickable citations in the body text. Click [12] and get
+            the resolved reference with its metadata, and the option
+            to add it to the library. Numbered bibliographies first,
+            then author-year ones (Acta Cryst and other IUCr titles
+            were the working case) resolved against OpenAlex
+
+ o FEATURE: A References panel per paper, with related-works and
+            cited-by popovers, from OpenAlex and falling back to
+            CrossRef's reference list where OpenAlex has none
+
+ o FEATURE: BibTeX import and export, including "ghost" entries: an
+            imported .bib makes a card for every entry, PDF or not.
+            "Get PDF" then fills a ghost in — open-access sources
+            first, Unpaywall next, and the publisher's landing-page
+            citation_pdf_url when Unpaywall lags behind
+
+ o FEATURE: Citations in the styles people are actually asked for:
+            "Cite as…" through CSL, plus RIS and CSL JSON export
+
+ o FEATURE: An author view: what someone has published recently, and
+            a citing-impact score split by whether the citing paper
+            treats the work as software, as a method, or as an idea.
+            That split is the unusual one — "cited as software" is a
+            different claim from "cited as an idea"
+
+ o FEATURE: Discover: search OpenAlex by author or topic without
+            leaving the application
+
+ o FEATURE: Subscriptions. Follow a journal or a saved search and
+            collect what is new into a feed, refreshed in the
+            background, with papers you already hold badged as such
+
+ o FEATURE: Full-text search over the library — including your own
+            highlight and comment text, so a paper can be found by
+            what you said about it. JSON columns are stored as raw
+            Unicode so that names with diacritics are findable
+
+ o FEATURE: Sort order is remembered between sessions
+
+ o CHANGE:  Care taken for shared and networked home directories:
+            the database filename carries the hostname so two
+            machines sharing an NFS $HOME cannot collide, sidecar
+            temporary files are hostname-suffixed, the database is
+            WAL-checkpointed and closed on shutdown, and a warning
+            appears when the SQLite cache is sitting on a network
+            filesystem where it does not belong
+
+ o CHANGE:  OpenAlex is treated as a shared resource: a session
+            circuit-breaker on repeated rate-limit responses, a
+            credit budget for background refreshers, and caching so
+            that browsing does not spend a daily allowance
+
+ o CHANGE:  The on-disk format was deliberately frozen before
+            release — sidecar JSON beside the PDF, thumbnail beside
+            it, index derived and disposable — so that later versions
+            could change their minds about everything else
+
+  (At this point the Python package was still named `pdforg`, and the
+  application was renamed to Alexandria on its second day.)
