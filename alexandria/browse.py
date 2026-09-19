@@ -1102,6 +1102,15 @@ def make_card(row, parent_window, conn, on_saved, mark_labels=None,
         cited_by_btn.connect(
             "clicked",
             lambda b: parent_window._open_cited_by_popover(b, row))
+        # The card already says "cited 0×" a few pixels away; an
+        # enabled button beside it invites a round-trip to be told
+        # the same thing. `== 0`, not falsiness: `None` means the count
+        # has never been fetched, and greying that would hide a
+        # working button on a guess.
+        if row["citations"] == 0:
+            cited_by_btn.set_sensitive(False)
+            cited_by_btn.set_tooltip_text(
+                "No papers cite this one yet (OpenAlex)")
         btn_row.append(cited_by_btn)
         refs_btn = Gtk.Button.new_from_icon_name("mail-reply-all-symbolic")
         refs_btn.set_tooltip_text(
@@ -5517,17 +5526,22 @@ class BrowserWindow(Adw.ApplicationWindow):
         right = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         right.set_valign(Gtk.Align.CENTER)
 
-        # Open Access chip — only renders when `is_oa` is true. Other
-        # callers (cited-by / references popovers) don't currently
-        # populate this field, so the chip is invisible there until
-        # they do.
-        if r.get("is_oa"):
-            oa_chip = Gtk.Label()
-            oa_chip.set_markup(
-                '<span foreground="#2a7a7a" weight="bold">'
-                '<small>OA</small></span>')
-            oa_chip.set_tooltip_text(
-                r.get("oa_url") or "Open Access")
+        # Open-access chip — the same one the cards use, so a paper
+        # reads the same in a popover as it does in the library.
+        # Cited-by and Related works now fetch `open_access` with the
+        # rest of the row (one request, two more fields); References
+        # does not yet, so its rows stay bare. The status is the
+        # useful part: Gold/Hybrid mean the publisher's own copy is
+        # free, Green only that a repository holds one — often the
+        # accepted manuscript, not the version of record.
+        oa_chip = make_oa_chip(r.get("is_oa"), r.get("oa_status"))
+        if oa_chip is not None:
+            if r.get("oa_url"):
+                oa_chip.get_child().set_tooltip_text(
+                    "Open access ({}) — {}".format(
+                        r.get("oa_status") or "status unknown",
+                        r["oa_url"]))
+            oa_chip.set_halign(Gtk.Align.END)
             right.append(oa_chip)
 
         doi = (r.get("doi") or "").lower()

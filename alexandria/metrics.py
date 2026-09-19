@@ -1470,6 +1470,26 @@ _CITED_BY_SORTS = {
 }
 
 
+def _oa_fields(work):
+    """`is_oa`, `oa_status` and `oa_url` from an OpenAlex work that was
+    fetched with `open_access,best_oa_location` in its `select`.
+
+    For the popover rows, whose OA chip was built and then left
+    invisible because nothing filled these keys in. Two more fields in
+    a request already being made, so the chip costs no round-trip.
+    `oa_status` is kept as well as the boolean because it is the more
+    useful answer: gold and hybrid mean the publisher's own copy is
+    free, green only that a repository holds one — often the accepted
+    manuscript rather than the version of record."""
+    oa = work.get("open_access") or {}
+    best = work.get("best_oa_location") or {}
+    return {
+        "is_oa": bool(oa.get("is_oa")),
+        "oa_status": oa.get("oa_status"),
+        "oa_url": best.get("pdf_url") or best.get("landing_page_url"),
+    }
+
+
 def fetch_cited_by(doi=None, openalex_id=None, sort="recent", limit=10):
     """Return the works that cite the given paper, as
     `[{openalex_id, doi, title, year, publication_date, journal,
@@ -1506,7 +1526,8 @@ def fetch_cited_by(doi=None, openalex_id=None, sort="recent", limit=10):
         ("per_page", str(limit)),
         ("select",
          "id,doi,title,publication_year,publication_date,"
-         "authorships,primary_location,cited_by_count"),
+         "authorships,primary_location,cited_by_count,"
+         "open_access,best_oa_location"),
     ]
     if OPENALEX_MAILTO:
         params.append(("mailto", OPENALEX_MAILTO))
@@ -1532,6 +1553,7 @@ def fetch_cited_by(doi=None, openalex_id=None, sort="recent", limit=10):
             "first_author": first,
             "last_author": last,
             "citations": w.get("cited_by_count") or 0,
+            **_oa_fields(w),
         })
     return out
 
@@ -2447,7 +2469,8 @@ def fetch_related_works(doi=None, openalex_id=None, limit=12):
         ("filter", filt),
         ("per_page", str(len(rel_ids))),
         ("select",
-         "id,doi,title,publication_year,authorships,primary_location"),
+         "id,doi,title,publication_year,authorships,primary_location,"
+         "open_access,best_oa_location"),
     ]
     if OPENALEX_MAILTO:
         params.append(("mailto", OPENALEX_MAILTO))
@@ -2473,6 +2496,7 @@ def fetch_related_works(doi=None, openalex_id=None, limit=12):
             "journal": src.get("display_name"),
             "first_author": first,
             "last_author": last,
+            **_oa_fields(w),
         }
     return [by_id[r] for r in rel_ids if r in by_id]
 
