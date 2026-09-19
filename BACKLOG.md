@@ -1592,6 +1592,225 @@ Pending features, roughly grouped. Newest at the top of each section.
   DOI suffix says `1996`. Publication year cannot be read off a
   DOI.)
 
+- **Preprint subscriptions: arXiv and bioRxiv.** Wanted so that
+  standing search terms quietly accumulate recommendations in the
+  background, without the user going looking.
+
+  **Filed 2026-09-19, with one correction to what follows: the Europe
+  PMC half is already built.** The entry below proposes routing
+  bioRxiv *search* through Europe PMC as if that were new work. It
+  shipped on 2026-09-12 for Discover's **Preprints** tab:
+  `europepmc.search_preprints(text, publisher=, since=, until=,
+  limit=)` (`c391a79`) returns complete Discover-shaped rows —
+  title, abstract, structured authors, DOI, date — with
+  `resultType=core` and the `SRC:PPR` / `PUBLISHER:` query already
+  worked out, and `pdf_fetch._biorxiv_pdf_urls` (`e9829bb`) already
+  does the resolve-and-append-`.full.pdf` fetch. So a
+  `europepmc_preprint` subscription kind is mostly one dispatch arm
+  in `feed.refresh_subscription` feeding that function's rows into
+  `discovered`, plus the `[P]` glyph.
+
+  What remains genuinely new: the **arXiv** Atom client, the
+  **bioRxiv subject-RSS** kind with its toggle grid and RDF parsing,
+  the grouped "All" view, and the preprint-vs-published **dedupe**,
+  which is the real design problem.
+
+  **Most of this already exists — do not rebuild it.** The
+  subscription machinery is in place and this is a new *source*, not
+  a new feature:
+
+    - `subscriptions` table (`kind`, `name`, `query`,
+      `fetch_interval_hours`, `last_fetched`) and a `discovered`
+      table keyed to it (`index.py:1132`, `:1144`).
+    - `feed.refresh_subscription` dispatches on `kind`, and already
+      handles **`journal_issn`**, **`openalex_query`** and
+      **`crossref_query`** (`feed.py:483-490`).
+    - A background refresher already runs it (`_feed_refresher` in
+      `browse.py`), and `feed_window.py` renders the results with a
+      kind glyph — `[J]` for journal, `[T]` for topic.
+
+  So "set search terms, collect in the background, appear without
+  effort" is **already shipped** for OpenAlex and Crossref. What is
+  missing is preprints, which is exactly where those two are late —
+  the same freshness gap noted under the metadata-scrapers entry.
+
+  **The two sources are not symmetrical. This is the part worth
+  knowing before starting.**
+
+  **arXiv has a real search API.** Verified 2026-09-16:
+
+      https://export.arxiv.org/api/query?search_query=all:cryoEM&max_results=3
+        → HTTP 200, Atom, 3 <entry> elements
+
+    Field prefixes (`all:`, `ti:`, `abs:`, `au:`, `cat:`), boolean
+    `AND`/`OR`, and `sortBy=submittedDate&sortOrder=descending` for a
+    recency feed. Note **https** — the `http://` form returned zero
+    entries in testing. arXiv asks for ~3s between requests, which
+    suits a background refresher fine.
+
+    There is also `https://rss.arxiv.org/rss/<category>` (e.g.
+    `q-bio.BM`) — 200, `application/rss+xml` — but it is
+    **category-only, no search**, and carries just that day's new
+    listings. Useful for "everything new in q-bio.BM", useless for a
+    search term. Probably a second kind rather than the main one.
+
+  **bioRxiv has no search endpoint at all.** Its two public routes:
+
+    - `connect.biorxiv.org/biorxiv_xml.php?subject=…` — subject RSS,
+      no query. One feed per subject collection; you subscribe to a
+      whole category and take what comes. Tested 2026-09-16 against
+      `?subject=bioinformatics` — HTTP 200 over https, 77 KB.
+
+      **The configuration UI wants toggle buttons, one per subject**
+      (Paul, 2026-09-16, from the subject menu on biorxiv.org). A flow
+      box of toggles, not a combo — the point is that several subjects
+      can be on at once, which the site's own menu does not allow.
+      **One subscription row per selected subject** — N subjects means
+      N rows and N fetches per refresh. (An earlier draft here
+      suggested a single row holding a set of subjects, to suppress
+      duplicates. Paul overruled it on 2026-09-16: *results should be
+      separated by subject, and a paper showing up in different
+      sections is fine.* Cross-listing is information — a paper in
+      both bioinformatics and genomics is telling you something — so
+      it should be visible in both, not collapsed.)
+
+      That decision costs nothing, because it is what the schema
+      already does:
+
+        * `discovered` is keyed `UNIQUE(subscription_id, doi)`
+          (`index.py:1161`), so dedupe is **already per subscription**.
+          One row per subject gives one `discovered` row per subject
+          automatically, and a cross-listed DOI simply lands in both.
+          No schema change, no `subject` column.
+        * `feed_window.py` already renders **one pill per subscription
+          plus an "All subscriptions" pill**, and selecting a pill
+          filters the body (`:434-447`, `:548`). One subject per
+          subscription therefore gives per-subject separation for
+          free — the pills *are* the subject sections.
+        * The kind glyph is currently binary, `"[J]" if kind ==
+          "journal_issn" else "[T]"` (`feed_window.py:438`), so it
+          needs a third arm for the preprint kind.
+
+      Two things do need doing:
+
+        * **The "All" view is a date-sorted union capped at 100**
+          (`feed_window.py:551-568`: `limit=100` per subscription,
+          then `rows[:100]`). With 27 subjects × 30 items that cap
+          hides most subjects entirely, and a flat date sort is the
+          opposite of "separated by subject". Under "All", group by
+          subscription with a header per subject instead of sorting
+          the union — `_build_feed_card(sub, art)` already receives
+          `sub`, so the card knows its own subject.
+        * Adding a subject subscription means creating several rows in
+          one gesture, so the add-dialog's toggle grid commits N rows
+          at once — unlike the journal/topic paths, which create one.
+
+      All 27 slugs below were fetched and **all 27 returned 30 items**
+      (2026-09-16), so this list can be hard-coded with confidence:
+
+          animal_behavior_and_cognition   microbiology
+          biochemistry                    molecular_biology
+          bioengineering                  neuroscience
+          bioinformatics                  paleontology
+          biophysics                      pathology
+          cancer_biology                  pharmacology_and_toxicology
+          cell_biology                    physiology
+          clinical_trials                 plant_biology
+          developmental_biology           scientific_communication_and_education
+          ecology                         synthetic_biology
+          epidemiology                    systems_biology
+          evolutionary_biology            zoology
+          genetics
+          genomics
+          immunology
+
+      Slug format: **lower case with underscores**. `+` and `%20` work
+      too; **hyphens do not**. `?subject=all` is also valid and is the
+      whole-server firehose.
+
+      **A bogus subject returns HTTP 200 with an empty item list, not
+      a 404** — verified with `?subject=not_a_real_subject`. So a
+      typo fails silently and looks like "no new papers". That is the
+      strongest argument for the fixed toggle list over a text entry,
+      and it means the fetcher should log an empty parse distinctly
+      from a failed one.
+
+      Details that will otherwise cost an hour:
+
+        * **It is RSS 1.0 / RDF, not RSS 2.0.** There is an
+          `<items><rdf:Seq>` index of resource URIs *followed* by the
+          real `<item rdf:about="…">` elements. A naive
+          `<item>…</item>` regex matches the index and yields empty
+          titles. Parse with ElementTree and the namespaces
+          `http://purl.org/rss/1.0/` and Dublin Core.
+        * **Every item carries a full abstract** — 30/30, mean 1635
+          chars — plus title, `dc:creator`, `dc:date` and
+          `dc:identifier`. So a `discovered` row populates straight
+          from the feed with **no enrichment call**, which is better
+          than the OpenAlex path.
+        * **DOIs carry a `doi:` prefix** to strip, and use the new
+          `10.64898/` bioRxiv prefix, not `10.1101/`.
+        * **Every subject returns exactly 30 items — a fixed cap,
+          not a time window.** How much time those 30 cover depends
+          entirely on how busy the subject is. Measured 2026-09-16:
+
+              neuroscience        30 items over   2 days
+              bioinformatics      30 items over   3 days
+              biophysics          30 items over   6 days
+              zoology             30 items over  37 days
+              sci. communication  30 items over  71 days
+              paleontology        30 items over 159 days
+
+          Two consequences. **The busiest selected subject sets the
+          refresh cadence** — neuroscience needs a daily poll or items
+          fall off the end unseen, while paleontology would be happy
+          with monthly; so `fetch_interval_hours` should be driven by
+          the busiest subject selected, not set per subscription by
+          hand. And **the first poll of a quiet subject delivers
+          months of backlog in one go**, so the DOI dedupe against
+          `discovered` has to be right before this ships, or the first
+          refresh floods the feed.
+        * bioRxiv sends a **malformed Content-Type**:
+          `application/xml;")` — harmless to curl and ElementTree,
+          but a client that validates the header will reject it.
+    - `api.biorxiv.org/details/biorxiv/<from>/<to>` — date-range
+      listing only.
+
+    And the volume rules out fetch-everything-then-filter: a single
+    day (2026-09-01) reported **413 papers**. A week of local
+    filtering is thousands of records per refresh.
+
+    **So route bioRxiv through Europe PMC instead**, which does index
+    preprints with full search — established 2026-09-09 under the
+    metadata-scrapers entry:
+
+        (SRC:PPR) AND (PUBLISHER:"bioRxiv") AND (ABSTRACT:"…")
+        AND (FIRST_PDATE:[… TO …])        &resultType=core
+
+    `resultType=core` is essential — the default `lite` returns no
+    abstracts and no URLs. And recall the PDFs *are* reachable
+    despite `hasPDF: "N"`: resolve the DOI and append `.full.pdf`.
+
+  **UI, which does need thought:**
+
+    - Adding a subscription currently means picking a journal or
+      typing a query. Preprints need a source choice (arXiv /
+      bioRxiv / both) and, for arXiv, optionally a category — so the
+      add-subscription flow grows a dimension.
+    - The result rows want a preprint marker. `_kind_chip`
+      (`feed_window.py:922`) already renders Correction / News /
+      Concern chips, so there is a slot for "Preprint"; the card view
+      has a preprint notion too (`browse.is_preprint`).
+    - The kind glyph is a two-character convention (`[J]`, `[T]`) —
+      `[P]` is the obvious extension.
+    - Worth deciding whether preprint hits are mixed into the same
+      feed or kept in their own stream. They are noisier and less
+      durable (a preprint may become a paper the user already has),
+      so the **dedupe question matters**: a preprint and its
+      published version share no DOI, and `discovered` is keyed on
+      DOI/openalex_id. Matching by title would be needed to avoid
+      recommending what the library already contains.
+
 - **v1 SHIPPED; the rest is follow-up.** Watch / subscription
   feed (Wispar-shaped). A "follow this
   journal / save this OpenAlex search and tell me what's new"
@@ -3129,6 +3348,25 @@ in the library, so the app already has somewhere better to send them.
   folder).
 
 ## UI
+
+- **Open-access status in the References popover too.** Follow-up to
+  `3714021`, which put Gold / Green / Hybrid OA chips on the Cited-by
+  and Related-works rows by adding `open_access,best_oa_location` to
+  the `select` of `fetch_cited_by` and `fetch_related_works`.
+  References is fed by the two `_enrich_works_by_*` helpers instead,
+  which need the same two fields and `**_oa_fields(w)` in their row
+  dicts. Patch by anchor, not by string: the
+  `"authorships,primary_location,cited_by_count"` tail occurs in both
+  helpers *and* `fetch_cited_by`.
+
+  Two limits worth knowing before starting. Rows that come from
+  `fetch_references`'s **CrossRef fallback will never carry OA data**,
+  so some references stay bare however this is done — a bare row there
+  means "unknown", not "closed". And the Cited-by treatment of
+  greying the button at zero does **not** transfer: an empty
+  OpenAlex `referenced_works` is a weak signal, because the CrossRef
+  fallback often finds references OpenAlex lacks. Greying References
+  would hide a route that still works.
 
 - **First run writes no config file, so the two settings that matter
   are invisible.** Measured 2026-09-12 by running with empty XDG
