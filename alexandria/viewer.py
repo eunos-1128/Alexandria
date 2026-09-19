@@ -1855,20 +1855,27 @@ class PdfViewerWindow(Gtk.Window):
         return None
 
     def _handle_citation_click(self, page_idx, x_pdf, y_pdf_down):
-        """Returns True when a citation link was hit and the jump
-        was scheduled."""
+        """Returns True when a citation link was hit and handled.
+
+        **The reference comes to the reader, not the reader to the
+        reference.** The popover has always shown the full entry text,
+        so moving the reader to the bibliography *and* showing them
+        the entry they had been moved to was doing the job twice — and
+        the move is the half with a cost, because it has to be undone
+        to get back to the sentence. So when the entry's text is known
+        the page stays where it is and only the popover opens; "Go to
+        reference" in it still makes the trip on request.
+
+        **The jump is the fallback, for when there is nothing to
+        show:** an entry the bibliography parser could not recover, or
+        a link with no reference number. Then moving to where the link
+        points is all there is, and today's behaviour — save the spot,
+        jump, open the popover — is kept."""
         entry = self._citation_at(page_idx, x_pdf, y_pdf_down)
         if entry is None:
             return False
         _rect, target_page, target_top, ref_n = entry
-        # Save the spot before moving, so the reader can get back to
-        # the sentence they were in the middle of.
-        self._push_jump_origin()
-        self._jump_to(target_page, target_top)
-        # After the jump, surface a popover anchored at the target
-        # entry with "Add to library" / "Add + try PDF" actions.
-        # Idle-add so layout has scrolled before we anchor — popover
-        # positioning uses current widget coordinates.
+        context = None
         if ref_n is not None:
             # "How did *this* paper characterise the work it's citing?"
             # — the sentence around the marker just clicked. Computed
@@ -1877,10 +1884,37 @@ class PdfViewerWindow(Gtk.Window):
             # citation like "(6, 7)" would otherwise be ambiguous.
             context = references_pdf.citation_context(
                 self.doc.get_page(page_idx), _rect)
+            if self._has_reference_text(ref_n):
+                # Idle-add rather than popping up from inside the click
+                # gesture: a popup mapped while the gesture still holds
+                # its implicit grab fails with "Tried to map a grabbing
+                # popup with a non-top most parent".
+                GLib.idle_add(
+                    self._show_reference_popover, ref_n, target_page,
+                    target_top, context, False)
+                return True
+        # Save the spot before moving, so the reader can get back to
+        # the sentence they were in the middle of.
+        self._push_jump_origin()
+        self._jump_to(target_page, target_top)
+        if ref_n is not None:
+            # Idle-add so layout has scrolled before the popover opens.
             GLib.idle_add(
                 self._show_reference_popover, ref_n, target_page,
-                target_top, context)
+                target_top, context, True)
         return True
+
+    def _has_reference_text(self, ref_n):
+        """True when the bibliography gave us this entry's text — the
+        test for whether the popover can stand in for the jump.
+
+        Parsing is lazy and cached (`_ensure_bibliography_parsed`), so
+        the first citation clicked pays for it here rather than a
+        moment later inside the popover; later clicks are a dict
+        lookup."""
+        self._ensure_bibliography_parsed()
+        entry = (self._bibliography_by_n or {}).get(ref_n)
+        return bool(entry and (entry.get("text") or "").strip())
 
     def _attach_link_motion_controller(self, da, page_idx):
         """Toggle the pointer cursor over citation links so the user
@@ -1942,20 +1976,24 @@ class PdfViewerWindow(Gtk.Window):
         self._bibliography_by_n = {e["n"]: e for e in entries}
 
     def _show_reference_popover(self, ref_n, target_page, target_top,
-                                context=None):
+                                context=None, jumped=True):
         """Toolbar-anchored popover for the citation the user just
-        jumped to. Shows the parsed entry text immediately, kicks
-        off OpenAlex resolution in a background thread, and once
-        resolved offers Add-to-library / Add+try-PDF actions.
+        clicked. Shows the parsed entry text immediately, kicks off
+        OpenAlex resolution in a background thread, and once resolved
+        offers Add-to-library / Add+try-PDF actions.
 
-        target_page / target_top are accepted for signature stability
-        (they're how the click handler tells us which entry); the
-        popover itself anchors to `self.ref_btn` in the toolbar.
+        `jumped` says whether the click already moved the reader to the
+        bibliography. Usually it did not — the popover *is* the
+        reference — and then "Go to reference" offers the trip for the
+        cases where seeing the entry in place is worth something:
+        confirming the resolution landed on the right entry, or looking
+        at what else that paper cites nearby. `target_page` /
+        `target_top` are where that trip goes. The popover itself
+        anchors to `self.ref_btn` in the toolbar either way.
 
         `context` is the sentence the citation appeared in, or None
         when it couldn't be recovered — see
         `references_pdf.citation_context`."""
-        del target_page, target_top
         self._ensure_bibliography_parsed()
         entry = self._bibliography_by_n.get(ref_n) or {
             "n": ref_n,
@@ -2043,17 +2081,42 @@ class PdfViewerWindow(Gtk.Window):
         back_btn = Gtk.Button(label="Back to text")
         back_btn.set_tooltip_text(
             "Return to the citation you jumped from (Alt-Left)")
-        back_btn.set_sensitive(bool(self._jump_stack))
         back_btn.connect("clicked", self._on_popover_back)
-        # The popover outlives the return trip — ref_btn keeps it
-        # around so the reference can be consulted again — so refresh
-        # sensitivity each time it's shown rather than only at build
-        # time. Once the reader has gone back there's nowhere left to
-        # go, and a live-looking button that does nothing is worse
-        # than a greyed-out one.
-        pop.connect(
-            "show",
-            lambda _p, _b=back_btn: _b.set_sensitive(bool(self._jump_stack)))
+
+        def _refresh_back(*_args):
+            # The popover outlives the return trip — ref_btn keeps it
+            # around so the reference can be consulted again — so this
+            # runs each time it is shown, not only when it is built.
+            # After a fallback jump the button is always there and
+            # greys out once the reader has gone back: a live-looking
+            # button that does nothing is worse than a greyed one.
+            # When the click did not jump, there is nothing to go back
+            # *to* until "Go to reference" has been used, so until
+            # then the button is not shown at all.
+            live = bool(self._jump_stack)
+            back_btn.set_sensitive(live)
+            if not jumped:
+                back_btn.set_visible(live)
+
+        # The jump, now on request rather than by default. Only offered
+        # when the click did not already make it: after a fallback jump
+        # the reader is standing on the entry, and a second press would
+        # stack a redundant "back" step.
+        if not jumped:
+            goto_btn = Gtk.Button(label="Go to reference")
+            goto_btn.set_tooltip_text(
+                "Show this entry in the paper's bibliography — "
+                "Back to text (Alt-Left) returns here")
+
+            def _go(_b, _page=target_page, _top=target_top):
+                self._push_jump_origin()
+                self._jump_to(_page, _top)
+                _refresh_back()
+            goto_btn.connect("clicked", _go)
+            back_row.append(goto_btn)
+
+        _refresh_back()
+        pop.connect("show", _refresh_back)
         back_row.append(back_btn)
         outer.append(back_row)
 

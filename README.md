@@ -227,8 +227,11 @@ modes — **Contents** (the PDF's own table of contents), **Pages**
 
 The part worth knowing about: **click a citation marker in the body
 text**. Alexandria resolves `[12]` against the paper's reference list
-and jumps there, showing the reference with its metadata and an
-option to add it to your library. This works from the publisher's own
+and shows the reference right where you are reading — the entry, the
+sentence it was cited in, its metadata and an option to add it to
+your library — so there is nothing to scroll back from. **Go to
+reference** makes the trip to the bibliography when you want it, and
+Alt-Left brings you back. This works from the publisher's own
 link annotations where they exist, and from the JATS full text or the
 printed reference list where they do not.
 

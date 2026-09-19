@@ -1227,6 +1227,31 @@ Pending features, roughly grouped. Newest at the top of each section.
   the vertical space cut and **no PDF icon**. Clicking a row expands
   it into the full card that we render today.
 
+- **DONE 2026-09-19** — built as the entry below proposes. A click on
+  a citation whose entry text is known opens the popover in place and
+  the page does not move; **Go to reference** in the popover makes the
+  trip on request, and only then does "Back to text" appear. The jump
+  survives as the fallback for an unparsed entry or a link with no
+  reference number, exactly as suggested — no preference needed. The
+  jump stack, "Back to text" and Alt-Left all stay, since the trip
+  still exists; they just stop being compulsory.
+
+  **Testing it on a real paper found an older bug underneath.**
+  `build_citation_links` appends the recovered links (paths C–E)
+  after the publisher's own annotations, and runs those paths exactly
+  when the annotations carry no reference number. So a paper could
+  list every citation twice at the same spot, the unnumbered copy
+  first, and `_citation_at` always took the first: every click jumped
+  to the top of the bibliography page with no popover. Measured over
+  57 papers with clickable citations: **4 affected, 49 shadowed
+  links**, three of the four Elsevier/Cell Press. Fixed at the source
+  by `_drop_shadowed_links`, which removes an unnumbered link only
+  where a numbered one covers most of it. (The Elsevier paper from the
+  2026-09-12 report is *not* one of the four; that was a different
+  problem, fixed then.)
+
+  Original entry:
+
 - **Do not jump to the reference at all — the popover already has
   it.** Proposed 2026-09-10: if the reference text is in the
   popover, there is nothing to jump to and nothing to come back
