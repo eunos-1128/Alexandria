@@ -594,7 +594,53 @@ def build_citation_links(pdf_path):
             num_links = _jats_citation_links(pdf_path, ay_bib)
         for pi, plinks in num_links.items():
             links.setdefault(pi, []).extend(plinks)
-    return links
+    return _drop_shadowed_links(links)
+
+
+def _drop_shadowed_links(links):
+    """Remove a publisher link that a numbered link sits on top of.
+
+    Paths C–E *append* their links to what Path A read, and they run
+    precisely when Path A's links carry no reference number. So a
+    paper can end up with every citation listed twice at the same
+    spot: the publisher's annotation first — no number, pointing only
+    at the bibliography's page — and the recovered link after it,
+    numbered and positioned. `_citation_at` returns the first match,
+    so every click took the useless one: a jump to the top of the
+    bibliography page and no popover. Measured on a 2026 paper with
+    stored JATS: ten links on page 1, five pairs, rects within 0.3 pt
+    of each other.
+
+    Conservative on purpose. An unnumbered link survives unless a
+    numbered one overlaps most of it, because for a citation the
+    recovery missed, the publisher's annotation is the only link
+    there is."""
+    out = {}
+    for page, plinks in (links or {}).items():
+        numbered = [e[0] for e in plinks if e[3] is not None]
+        if not numbered:
+            out[page] = plinks
+            continue
+        out[page] = [e for e in plinks
+                     if e[3] is not None
+                     or not any(_mostly_covered(e[0], r)
+                                for r in numbered)]
+    return out
+
+
+def _mostly_covered(rect, by):
+    """True when `by` covers at least half of `rect`. Rects are PDF
+    `(x1, y1, x2, y2)` in either corner order."""
+    ax1, ax2 = sorted((rect[0], rect[2]))
+    ay1, ay2 = sorted((rect[1], rect[3]))
+    bx1, bx2 = sorted((by[0], by[2]))
+    by1, by2 = sorted((by[1], by[3]))
+    w = min(ax2, bx2) - max(ax1, bx1)
+    h = min(ay2, by2) - max(ay1, by1)
+    if w <= 0 or h <= 0:
+        return False
+    area = (ax2 - ax1) * (ay2 - ay1)
+    return area > 0 and (w * h) / area >= 0.5
 
 
 def _jats_citation_links(pdf_path, bib_entries):
