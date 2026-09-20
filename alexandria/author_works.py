@@ -2327,7 +2327,14 @@ class AuthorPage(Gtk.Box):
                 return
 
         try:
-            rec, status = importer.import_pdf(self.conn, target)
+            # The same status line the download was narrating to: an
+            # import can take seconds (poppler twice, up to five
+            # network calls), and going quiet between "Downloading…"
+            # and the card appearing is what made a slow one look
+            # like nothing happening at all.
+            GLib.idle_add(self._set_add_btn_label, btn, "Importing…")
+            rec, status = importer.import_pdf(self.conn, target,
+                                              on_progress=progress)
         except Exception as e:
             print("Add to archive: import failed for {}: {}".format(target, e))
             GLib.idle_add(self._add_to_archive_done, btn, False, str(e), None)

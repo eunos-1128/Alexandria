@@ -9,6 +9,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import urllib.parse
 import urllib.request
 
@@ -338,20 +339,68 @@ def _split_authors(s):
     return [s.strip()] if s.strip() else []
 
 
-def _run_pdfx(pdf_path):
-    """Open `pdf_path` via the pdfx library and return its summary
-    dict (same shape `pdfx -j <pdf>` produced on stdout: keys
-    `source`, `metadata`, `references`). Returns None on any error."""
-    if not HAVE_PDFX:
-        return None
+# How long pdfx may take before we stop waiting for it. Measured
+# across a real library: 0.5 s for a 6-page paper, 3.1 s for 21
+# pages. The budget is generous against that, and exists only to
+# bound the pathological case below.
+_PDFX_BUDGET_S = 25
+
+
+def _has_xmp(pdf_path):
+    """True when the PDF carries an XMP metadata stream.
+
+    The gate on running pdfx at all, because **XMP is the only thing
+    we take from it** — `_extract_from_pdfx` reads `summary["metadata"]`
+    and nothing else. A document without that stream cannot yield
+    anything, and pdfx would parse every page to discover that.
+
+    Costs 13–21 ms, measured; pdfx costs seconds at best."""
+    if not HAVE_PYPDF:
+        return False
     try:
-        pdf = _pdfx.PDFx(pdf_path)
+        return PdfReader(pdf_path).xmp_metadata is not None
+    except Exception:
+        return False
+
+
+def _run_pdfx(pdf_path, budget=_PDFX_BUDGET_S):
+    """The pdfx library's summary dict for `pdf_path` (keys `source`,
+    `metadata`, `references`), or None.
+
+    **In a subprocess, on a clock.** `PDFx()` parses the whole
+    document to build its reference list, which we do not use, and on
+    one real paper — 44 pages, iText-produced, no XMP — that ran for
+    over five minutes at 100% CPU and had not finished. Extraction is
+    serialised behind `_extract_gate`, so a file like that does not
+    merely import slowly: it stops every other import until it
+    finishes, which is what "the main window never updated" looked
+    like from outside.
+
+    A thread could not fix it, because a Python thread cannot be
+    stopped. A subprocess can be killed, and costs 0.12 s to start —
+    a fair price for a guarantee, and only paid by files that have
+    XMP worth reading."""
+    if not HAVE_PDFX or not _has_xmp(pdf_path):
+        return None
+    code = ("import json,sys,pdfx;"
+            "print(json.dumps(pdfx.PDFx(sys.argv[1]).summary, default=str))")
+    try:
+        done = subprocess.run(
+            [sys.executable, "-c", code, pdf_path],
+            capture_output=True, timeout=budget)
+    except subprocess.TimeoutExpired:
+        print("[extract] pdfx gave up after {}s on {}".format(
+            budget, os.path.basename(pdf_path)))
+        return None
     except Exception:
         return None
-    try:
-        return pdf.summary
-    except Exception:
+    if done.returncode != 0 or not done.stdout:
         return None
+    try:
+        data = json.loads(done.stdout.decode("utf-8", "replace"))
+    except ValueError:
+        return None
+    return data if isinstance(data, dict) else None
 
 
 def _first_str(v):
