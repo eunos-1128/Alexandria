@@ -1506,6 +1506,18 @@ class PdfViewerWindow(Gtk.Window):
             "clicked",
             lambda _b, hh=h: self._scroll_to_highlight(hh))
         row.append(goto_btn)
+
+        # The whole row navigates, not only the arrow. Contents and
+        # Pages both go where you click, and the highlight's own text
+        # is the obvious thing to aim at — reported as "navigation by
+        # highlighted text is not working", which is exactly what
+        # hitting a 16 px button instead looks like. The arrow stays
+        # as the affordance that says the row goes somewhere.
+        click = Gtk.GestureClick()
+        click.connect("released", lambda *_a, hh=h:
+                      self._scroll_to_highlight(hh))
+        row.add_controller(click)
+        row.set_cursor(Gdk.Cursor.new_from_name("pointer", None))
         return row
 
     def _scroll_to_highlight(self, h):

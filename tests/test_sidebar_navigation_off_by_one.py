@@ -143,3 +143,46 @@ def test_an_outline_row_without_a_page_is_not_clickable():
 
     assert _click(row) is False
     assert side.went_to == []
+
+
+# ---- the highlights list ---------------------------------------------
+
+def test_clicking_a_highlight_row_navigates_not_just_its_arrow():
+    """Reported as "navigation by highlighted text is not working".
+    The jump worked; only the 16 px arrow on the right was wired to
+    it, while Contents and Pages both go where you click."""
+    side = _Sidebar()
+    side.highlights = []
+    side.sidecar_path = "/x/p.pdf.alexandria"
+    jumped = []
+    side._scroll_to_highlight = lambda h: jumped.append(h)
+
+    h = {"page": 3, "text": "dual-space direct methods",
+         "comment": "the key claim", "quads": [[10.0, 100.0, 80.0, 12.0]]}
+    row = viewer.PdfViewerWindow._build_highlight_row(side, h)
+
+    assert _click(row), "the row itself carries a click gesture"
+    assert jumped == [h]
+
+
+def test_the_arrow_still_works_too():
+    side = _Sidebar()
+    jumped = []
+    side._scroll_to_highlight = lambda h: jumped.append(h)
+    h = {"page": 1, "text": "a phrase", "quads": []}
+
+    row = viewer.PdfViewerWindow._build_highlight_row(side, h)
+    buttons = []
+
+    def walk(w):
+        if isinstance(w, Gtk.Button):
+            buttons.append(w)
+        c = w.get_first_child()
+        while c is not None:
+            walk(c)
+            c = c.get_next_sibling()
+
+    walk(row)
+    assert buttons, "the arrow is still there as the affordance"
+    buttons[-1].emit("clicked")
+    assert jumped == [h]
