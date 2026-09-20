@@ -305,3 +305,21 @@ def test_the_follow_button_sits_below_the_subjects(window):
     assert window._subject_scroller.get_visible() is False
     assert (order.index(window._add_entry)
             < order.index(window._add_action_btn))
+
+
+@needs_display
+def test_no_empty_results_area_in_the_modes_that_never_fill_it(window):
+    """The journal picker reserves 180 px whether or not it holds
+    anything; in Topic and Preprints that was a gap below the button
+    with nothing to explain it."""
+    assert window._add_results_scroller.get_visible() is True, \
+        "journal mode opens with the picker"
+
+    window._add_preprint_btn.set_active(True)
+    assert window._add_results_scroller.get_visible() is False
+
+    window._add_topic_btn.set_active(True)
+    assert window._add_results_scroller.get_visible() is False
+
+    window._add_journal_btn.set_active(True)
+    assert window._add_results_scroller.get_visible() is True

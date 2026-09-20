@@ -281,11 +281,17 @@ class FeedWindow(Adw.Window):
         # adds the subscription.
         self._add_results = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
                                     spacing=2)
-        scrolled = Gtk.ScrolledWindow()
-        scrolled.set_min_content_height(180)
-        scrolled.set_min_content_width(440)
-        scrolled.set_child(self._add_results)
-        b.append(scrolled)
+        self._add_results_scroller = Gtk.ScrolledWindow()
+        self._add_results_scroller.set_min_content_height(180)
+        self._add_results_scroller.set_min_content_width(440)
+        self._add_results_scroller.set_child(self._add_results)
+        # Journal mode only, and hidden in the others: its 180 px
+        # minimum is reserved whether or not anything is in it, which
+        # left an unexplained gap below the button in the two modes
+        # that never fill it. Starts visible because the panel opens
+        # in journal mode — the initial `set_active` above runs before
+        # the handler is connected, so it does not set this up.
+        b.append(self._add_results_scroller)
 
         self._add_status = Gtk.Label(xalign=0.0)
         self._add_status.set_markup(
@@ -330,6 +336,7 @@ class FeedWindow(Adw.Window):
         # items and would look like a quiet week for ever.
         self._add_entry.set_visible(mode != "preprint")
         self._subject_scroller.set_visible(mode == "preprint")
+        self._add_results_scroller.set_visible(mode == "journal")
         _clear_box(self._add_results)
 
     def _on_add_query(self, _w):
