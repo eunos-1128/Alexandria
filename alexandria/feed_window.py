@@ -244,23 +244,28 @@ class FeedWindow(Adw.Window):
         self._add_action_btn.connect("clicked", self._on_add_query)
         b.append(self._add_action_btn)
 
-        # bioRxiv subject grid. Toggles rather than a combo, because
-        # several subjects can be followed at once — which bioRxiv's
-        # own subject menu does not allow. One subscription row per
-        # subject: `discovered` is keyed UNIQUE(subscription_id, doi),
-        # so per-subject rows give per-subject dedupe for free, and a
+        # bioRxiv subject grid, one subscription per ticked subject:
+        # `discovered` is keyed UNIQUE(subscription_id, doi), so
+        # per-subject rows give per-subject dedupe for free, and a
         # cross-listed preprint lands in both subjects rather than
         # being collapsed into one. Cross-listing is information.
-        self._subject_toggles = {}
+        #
+        # Check buttons, not toggle buttons. A toggle represents a
+        # mode being turned on; choosing several items from a fixed
+        # list is what checkboxes are for. It also matters at a
+        # glance: a flat toggle's pressed state is a faint background
+        # shade, easy to misread across 27 of them, where a tick is
+        # unambiguous — and a checkbox announces itself as one to a
+        # screen reader.
+        self._subject_checks = {}
         grid = Gtk.FlowBox()
         grid.set_selection_mode(Gtk.SelectionMode.NONE)
-        grid.set_max_children_per_line(3)
+        grid.set_max_children_per_line(2)
         grid.set_row_spacing(2)
-        grid.set_column_spacing(2)
+        grid.set_column_spacing(12)
         for slug in biorxiv.SUBJECTS:
-            t = Gtk.ToggleButton(label=biorxiv.subject_label(slug))
-            t.add_css_class("flat")
-            self._subject_toggles[slug] = t
+            t = Gtk.CheckButton(label=biorxiv.subject_label(slug))
+            self._subject_checks[slug] = t
             grid.append(t)
         self._subject_scroller = Gtk.ScrolledWindow()
         self._subject_scroller.set_min_content_height(230)
@@ -444,7 +449,7 @@ class FeedWindow(Adw.Window):
 
         Already-followed subjects are skipped rather than refused, so
         ticking a few more later does the obvious thing."""
-        chosen = [slug for slug, btn in self._subject_toggles.items()
+        chosen = [slug for slug, btn in self._subject_checks.items()
                   if btn.get_active()]
         if not chosen:
             self._add_status.set_markup(
@@ -469,7 +474,7 @@ class FeedWindow(Adw.Window):
                         GLib.markup_escape_text(str(e))))
                 return
             added.append(sid)
-            self._subject_toggles[slug].set_active(False)
+            self._subject_checks[slug].set_active(False)
         if not added:
             self._add_status.set_markup(
                 "<span size='small' alpha='75%'>Already following "

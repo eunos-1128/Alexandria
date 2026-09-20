@@ -231,7 +231,7 @@ def test_preprint_mode_offers_subjects_instead_of_a_text_box(window):
 
     assert window._subject_scroller.get_visible() is True
     assert window._add_entry.get_visible() is False
-    assert len(window._subject_toggles) == 27
+    assert len(window._subject_checks) == 27
 
     window._add_topic_btn.set_active(True)
     assert window._subject_scroller.get_visible() is False
@@ -246,8 +246,8 @@ def test_each_ticked_subject_becomes_its_own_subscription(window):
     from alexandria import index
 
     window._add_preprint_btn.set_active(True)
-    window._subject_toggles["biophysics"].set_active(True)
-    window._subject_toggles["genomics"].set_active(True)
+    window._subject_checks["biophysics"].set_active(True)
+    window._subject_checks["genomics"].set_active(True)
 
     window._do_add_subjects()
 
@@ -259,7 +259,7 @@ def test_each_ticked_subject_becomes_its_own_subscription(window):
     # The ticks are cleared, so the panel does not re-offer what is
     # already followed.
     assert not any(t.get_active()
-                   for t in window._subject_toggles.values())
+                   for t in window._subject_checks.values())
 
 
 @needs_display
@@ -267,9 +267,9 @@ def test_following_the_same_subject_twice_is_a_no_op(window):
     from alexandria import index
 
     window._add_preprint_btn.set_active(True)
-    window._subject_toggles["ecology"].set_active(True)
+    window._subject_checks["ecology"].set_active(True)
     window._do_add_subjects()
-    window._subject_toggles["ecology"].set_active(True)
+    window._subject_checks["ecology"].set_active(True)
     window._do_add_subjects()
 
     subs = [s for s in index.list_subscriptions(window.conn)
