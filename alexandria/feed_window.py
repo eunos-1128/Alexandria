@@ -238,12 +238,6 @@ class FeedWindow(Adw.Window):
         self._add_entry.connect("activate", self._on_add_query)
         b.append(self._add_entry)
 
-        # Action button — text changes per mode.
-        self._add_action_btn = Gtk.Button(label="Find journal")
-        self._add_action_btn.add_css_class("suggested-action")
-        self._add_action_btn.connect("clicked", self._on_add_query)
-        b.append(self._add_action_btn)
-
         # bioRxiv subject grid, one subscription per ticked subject:
         # `discovered` is keyed UNIQUE(subscription_id, doi), so
         # per-subject rows give per-subject dedupe for free, and a
@@ -273,6 +267,14 @@ class FeedWindow(Adw.Window):
         self._subject_scroller.set_child(grid)
         self._subject_scroller.set_visible(False)
         b.append(self._subject_scroller)
+
+        # Below the subject grid, not above it: you choose the
+        # subjects and then act on them. The other two modes hide the
+        # grid, so the button stays next to their entry anyway.
+        self._add_action_btn = Gtk.Button(label="Find journal")
+        self._add_action_btn.add_css_class("suggested-action")
+        self._add_action_btn.connect("clicked", self._on_add_query)
+        b.append(self._add_action_btn)
 
         # Results area (journal mode only — topic mode adds directly
         # without a picker step). Each row is clickable; clicking

@@ -285,3 +285,23 @@ def test_nothing_ticked_says_so(window):
     window._do_add_subjects()
 
     assert "at least one" in window._add_status.get_label()
+
+
+@needs_display
+def test_the_follow_button_sits_below_the_subjects(window):
+    """You choose the subjects, then act on them."""
+    window._add_preprint_btn.set_active(True)
+
+    order, child = [], window._add_action_btn.get_parent().get_first_child()
+    while child is not None:
+        order.append(child)
+        child = child.get_next_sibling()
+
+    assert (order.index(window._subject_scroller)
+            < order.index(window._add_action_btn))
+    # And in the other modes the button still follows the entry
+    # directly, because the grid between them is hidden.
+    window._add_journal_btn.set_active(True)
+    assert window._subject_scroller.get_visible() is False
+    assert (order.index(window._add_entry)
+            < order.index(window._add_action_btn))
