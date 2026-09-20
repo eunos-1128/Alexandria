@@ -1,3 +1,53 @@
+  Release Notes for 0.7.0
+
+ o FEATURE: Follow bioRxiv subject collections. bioRxiv has no
+            search, so each subject has its own feed.
+
+ o FEATURE: "Find" within an author's works. It highlights rather
+            than filters: the list is ordered by date or by citations.
+
+ o FEATURE: PDF Reader: Clicking a citation shows the reference where
+            you are reading, instead of jumping to the bibliography
+            and leaving you to find your way back. "Go to reference"
+            still makes the trip when you want it.
+
+ o FEATURE: Cited-by and Related-works rows say whether the paper is
+            open access, and which kind.
+
+ o FEATURE: The "Cited by" button is greyed out when the card already
+            says "cited 0×".
+
+ o CHANGE:  pdfx is no longer a dependency. It was archived in 2023,
+            last released in 2021, and pinned two 2020 packages
+            exactly. It was used only for XMP metadata — which pypdf
+            already does. Fixes an import hang.
+
+ o CHANGE:  The menu item now says "Discover…" rather than "Discover
+            (OpenAlex)": two of that window's five tabs ask PDBe and
+            Europe PMC.
+
+ o BUG-FIX: Clicking a page in the viewer's sidebar actually took you
+            to the next one.
+
+ o BUG-FIX: On some papers every citation was listed twice, and the
+            click always took the useless copy: a jump to the top of
+            the bibliography and no reference popover.
+
+ o BUG-FIX: An AI summary showed its Markdown raw i.e. every heading
+            and bullet literal - if one species name was written in
+            bold italics. One malformed span no longer flattens the
+            whole summary.
+
+ o BUG-FIX: arXiv papers took their landing-page URL as their DOI,
+            which stopped every later lookup, because the record then
+            had one. They now resolve properly.
+
+ o BUG-FIX: Adding a paper from an author's page says what it is
+            doing while it does it, rather than going quiet between
+            "Downloading..." and the card appearing.
+
+-----
+
   Release Notes for 0.6.0
 
  o FEATURE: One authors database and one author-photo store, shared

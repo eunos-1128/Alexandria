@@ -60,6 +60,35 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.7.0" date="2026-09-20">
+      <url type="details">https://github.com/pemsley/Alexandria/blob/main/RELEASE-NOTES</url>
+      <description>
+        <p>
+          Preprints you can follow, finding your way around a long
+          author page, and references that come to you instead of
+          moving you.
+        </p>
+        <ul>
+          <li>Follow bioRxiv subject collections — each subject keeps
+            its own feed</li>
+          <li>Find within an author's works: it highlights rather
+            than filters, so the order of the list is kept</li>
+          <li>Clicking a citation shows the reference where you are
+            reading; "Go to reference" still makes the trip</li>
+          <li>Cited-by and Related-works rows say whether a paper is
+            open access, and which kind</li>
+          <li>pdfx is no longer a dependency — it was archived in
+            2023 and could hang an import indefinitely</li>
+          <li>Clicking a page in the viewer's sidebar took you to the
+            next one</li>
+          <li>On some papers every citation was listed twice, and the
+            click took the copy that led nowhere</li>
+          <li>An AI summary could show its Markdown raw</li>
+          <li>arXiv papers took their landing-page URL as their
+            DOI</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.6.0" date="2026-09-13">
       <url type="details">https://github.com/pemsley/Alexandria/blob/main/RELEASE-NOTES</url>
       <description>
