@@ -50,6 +50,9 @@ SHORTCUTS = [
         ("Previous match", "<Shift>F3"),
         ("Clear the search", "Escape"),
     ]),
+    ("Authors", [
+        ("Find in this author's works", "<Control>f"),
+    ]),
     ("Following citations", [
         ("Back to where you were", "<Alt>Left"),
     ]),

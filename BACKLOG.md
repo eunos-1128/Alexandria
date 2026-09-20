@@ -2203,6 +2203,35 @@ Pending features, roughly grouped. Newest at the top of each section.
   alongside Frequent collaborators — does not exist. Original
   entry:
 
+- **DONE 2026-09-20** — built as specified, in `find_text.py` so the
+  reference list and "Cited most often by" can have it next. A find
+  bar above the works list marks matches in the title, author and
+  meta lines with the app's one "found" yellow, counts rows ("4 of
+  50"), and steps between matches with wraparound; Ctrl+F reaches it,
+  matching the library window's habit. Every row stays on screen,
+  which was the point.
+
+  Settled the open question in favour of **visible fields only** —
+  title, authors, year, journal, type, topic. The abstract is fetched
+  but not shown, and a row that lights up for a word the reader cannot
+  see reads as a false positive.
+
+  **The one thing that took real work: titles are not plain text.**
+  OpenAlex and JATS send inline markup that `safe_pango_markup` keeps
+  (`<i>`, `<sub>`), so the obvious approach — cut the text at match
+  boundaries, escape each fragment — corrupts it: measured,
+  "H<sub>2</sub>O in cryo-EM" came back with the space before "cryo"
+  missing, because escaping normalises what it is given. So the text
+  is escaped once, as a whole, and matches are found *inside* the
+  escaped string, skipping any that would cut a preserved tag. That
+  also makes a query containing "&" or "<" match, since the needle is
+  escaped the same way.
+
+  Measured on a real author page (Murshudov, 50 works): refmac 4 of
+  50, cryo 17 of 50, acta 14 of 50, all 50 rows still listed.
+
+  Original entry:
+
 - **Find within an author's works — highlight, do not filter.** Asked
   for 2026-09-16. The works list is up to 50 rows
   (`_cached_or_fetch_works`, `limit=50`) and there is no way to look

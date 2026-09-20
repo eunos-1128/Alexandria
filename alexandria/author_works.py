@@ -18,7 +18,8 @@ from gi.repository import Gtk, GLib, Gdk, Gio, Pango, Adw, GObject
 import datetime
 
 from . import (metrics, index, importer, opener, author_image,
-               viewer, pdf_fetch, status_ticker, funding, gtr, gestures)
+               viewer, pdf_fetch, status_ticker, funding, gtr, gestures,
+               find_text)
 from .identity import user_agent
 from .markup import safe_pango_markup
 
@@ -700,6 +701,41 @@ class AuthorPage(Gtk.Box):
 
         self.append(sort_row)
 
+        # --- Find in these works --------------------------------------
+        # Highlights, never filters. The list's order is the
+        # information — newest first, or most cited first — so hiding
+        # the rows that do not match would answer "which" at the cost
+        # of "where in the career", which is usually the question. See
+        # find_text.
+        find_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        self._find_entry = Gtk.SearchEntry()
+        self._find_entry.set_placeholder_text("Find in these works")
+        self._find_entry.set_width_chars(22)
+        self._find_entry.connect("search-changed", self._on_find_changed)
+        # Enter walks the matches, like a browser's find bar.
+        self._find_entry.connect("activate", lambda _e: self._step_find(1))
+        find_row.append(self._find_entry)
+        self._find_count = Gtk.Label(xalign=0.0)
+        self._find_count.add_css_class("dim-label")
+        find_row.append(self._find_count)
+        self._find_prev_btn = Gtk.Button.new_from_icon_name("go-up-symbolic")
+        self._find_prev_btn.add_css_class("flat")
+        self._find_prev_btn.set_tooltip_text("Previous match")
+        self._find_prev_btn.connect("clicked", lambda _b: self._step_find(-1))
+        self._find_next_btn = Gtk.Button.new_from_icon_name("go-down-symbolic")
+        self._find_next_btn.add_css_class("flat")
+        self._find_next_btn.set_tooltip_text("Next match")
+        self._find_next_btn.connect("clicked", lambda _b: self._step_find(1))
+        for b in (self._find_prev_btn, self._find_next_btn):
+            b.set_visible(False)
+            find_row.append(b)
+        self.append(find_row)
+        # One entry per row on screen: the widgets to re-mark, and the
+        # plain text to match against.
+        self._find_rows = []
+        self._find_matches = []
+        self._find_at = -1
+
         # --- Status + results list ------------------------------------
         # The status line and, beside it, a small bar that pulses
         # while OpenAlex is being waited on.
@@ -1071,6 +1107,11 @@ class AuthorPage(Gtk.Box):
             nxt = child.get_next_sibling()
             self.list_box.remove(child)
             child = nxt
+        # The rows are gone; anything find remembered about them is
+        # now a reference to a removed widget.
+        self._find_rows = []
+        self._find_matches = []
+        self._find_at = -1
 
     def _spawn_works_only_fetch(self):
         """Background refresh of just the works list (skip the
@@ -1839,10 +1880,14 @@ class AuthorPage(Gtk.Box):
         title_lbl.set_selectable(True)
         title_lbl.set_hexpand(True)
         from .browse import _title_color
-        title_lbl.set_markup(
-            "<span foreground='{}'><b>{}</b></span>".format(
-                _title_color(self), safe_pango_markup(title)))
+        colour = _title_color(self)
+
+        def _wrap_title(marked, _c=colour):
+            return "<span foreground='{}'><b>{}</b></span>".format(
+                _c, marked)
+        title_lbl.set_markup(_wrap_title(safe_pango_markup(title)))
         title_row.append(title_lbl)
+        fields = [(title_lbl, title, _wrap_title)]
 
         # Retracted chip — highest-priority warning, drawn first
         # so it sits closest to the title. OpenAlex carries the
@@ -1947,9 +1992,11 @@ class AuthorPage(Gtk.Box):
             auth_lbl = Gtk.Label(xalign=0.0)
             auth_lbl.set_wrap(True)
             auth_lbl.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+            def _wrap_authors(marked):
+                return "<span size='small'>{}</span>".format(marked)
             auth_lbl.set_markup(
-                "<span size='small'>{}</span>".format(
-                    GLib.markup_escape_text(auth_line)))
+                _wrap_authors(GLib.markup_escape_text(auth_line)))
+            fields.append((auth_lbl, auth_line, _wrap_authors))
             if auth_line.endswith("et al."):
                 auth_lbl.set_tooltip_text(", ".join(w["authors"]))
             box.append(auth_lbl)
@@ -2003,13 +2050,22 @@ class AuthorPage(Gtk.Box):
         if w.get("top_topic"):
             meta_bits.append(w["top_topic"])
         if meta_bits:
+            meta_text = "  ·  ".join(meta_bits)
             meta_lbl = Gtk.Label(xalign=0.0)
+
+            def _wrap_meta(marked):
+                return "<span size='small' alpha='75%'>{}</span>".format(
+                    marked)
             meta_lbl.set_markup(
-                "<span size='small' alpha='75%'>{}</span>".format(
-                    GLib.markup_escape_text("  ·  ".join(meta_bits))))
+                _wrap_meta(GLib.markup_escape_text(meta_text)))
             meta_lbl.set_wrap(True)
             meta_lbl.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
             box.append(meta_lbl)
+            # Year, journal and topic are on the line, so they are
+            # findable. The abstract is fetched but not shown, and
+            # matching text the reader cannot see reads as a false
+            # positive — so it is left out.
+            fields.append((meta_lbl, meta_text, _wrap_meta))
 
         # Action buttons.
         btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
@@ -2100,7 +2156,76 @@ class AuthorPage(Gtk.Box):
         # rebuild this row in place when library membership changes
         # (e.g. an import landing via the browser extension).
         frame._work = w
+        self._find_rows.append({"row": frame, "fields": fields})
+        # A row built while a search is live starts marked, rather than
+        # waiting for the next keystroke — rows arrive from a refetch
+        # or a sort change with the entry still full.
+        query = self._find_entry.get_text() if self._find_entry else ""
+        if query:
+            self._mark_row(self._find_rows[-1], query)
+            self._update_find_summary()
         return frame
+
+    # --- Find in these works -------------------------------------------
+
+    def _on_find_changed(self, entry):
+        query = entry.get_text()
+        for rec in self._find_rows:
+            self._mark_row(rec, query)
+        self._find_at = -1
+        self._update_find_summary()
+        # Land on the first match as soon as there is one, so typing
+        # takes you there without a second gesture.
+        if self._find_matches:
+            self._step_find(1)
+
+    def _mark_row(self, rec, query):
+        """Re-render one row's labels with the matches marked, and
+        record whether it matched at all."""
+        hit = False
+        for label, text, wrap in rec["fields"]:
+            label.set_markup(wrap(find_text.highlight(text, query)))
+            if find_text.spans(text, query):
+                hit = True
+        rec["match"] = hit
+
+    def _update_find_summary(self):
+        query = self._find_entry.get_text()
+        self._find_matches = [i for i, rec in enumerate(self._find_rows)
+                              if rec.get("match")]
+        self._find_count.set_text(
+            find_text.summary(len(self._find_matches),
+                              len(self._find_rows), query))
+        # Stepping buttons only when there is more than one place to
+        # step between.
+        walkable = len(self._find_matches) > 1
+        self._find_prev_btn.set_visible(walkable)
+        self._find_next_btn.set_visible(walkable)
+
+    def _step_find(self, delta):
+        """Move to the next (or previous) matching row and scroll it
+        into view. Wraps around, like a find bar."""
+        if not self._find_matches:
+            return
+        if self._find_at < 0:
+            self._find_at = 0 if delta > 0 else len(self._find_matches) - 1
+        else:
+            self._find_at = ((self._find_at + delta)
+                             % len(self._find_matches))
+        rec = self._find_rows[self._find_matches[self._find_at]]
+        self._scroll_row_into_view(rec["row"])
+
+    def _scroll_row_into_view(self, row):
+        """`Gtk.Viewport.scroll_to` needs GTK 4.12; fall back to
+        focusing the row, which also brings it in."""
+        viewport = self.list_box.get_parent()
+        if hasattr(viewport, "scroll_to"):
+            try:
+                viewport.scroll_to(row, None)
+                return
+            except Exception:
+                pass
+        row.grab_focus()
 
     # ------------------------------------------------------------------
     # Add to Archive: download an OA PDF and import it into the library.
@@ -2308,6 +2433,18 @@ class AuthorsWindow(Adw.Window):
 
         self.set_content(self.split)
 
+        # Ctrl+F reaches the find bar on whichever author is showing —
+        # the same key the library window uses for its own search, so
+        # the habit carries across. GLOBAL scope because the focus is
+        # usually in the sidebar or on nothing in particular, not
+        # inside the page that owns the entry.
+        finder = Gtk.ShortcutController()
+        finder.set_scope(Gtk.ShortcutScope.GLOBAL)
+        finder.add_shortcut(Gtk.Shortcut.new(
+            Gtk.ShortcutTrigger.parse_string("<Control>f"),
+            Gtk.CallbackAction.new(lambda *_a: self._focus_find())))
+        self.add_controller(finder)
+
         # Below 640sp the split view collapses to a navigation stack:
         # the sidebar fills the window and selecting an author pushes
         # their page with a back button.
@@ -2321,6 +2458,15 @@ class AuthorsWindow(Adw.Window):
         for entry in index.list_author_trail(self.conn, self._sort):
             self._append_row(entry)
         self._update_empty_state()
+
+    def _focus_find(self):
+        """Put the cursor in the visible author page's find box."""
+        name = self.stack.get_visible_child_name()
+        page = self._pages.get(name)
+        if page is None:
+            return False
+        page._find_entry.grab_focus()
+        return True
 
     # --- Sidebar ordering ---------------------------------------------
 
