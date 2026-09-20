@@ -266,8 +266,17 @@ they are shared across catalogues, as are any photographs you attach.
 
 ### Keeping up
 
-**Subscriptions** follow a journal or a saved OpenAlex search and
-collect what is new into a feed.
+**Subscriptions** follow a journal, a saved OpenAlex search, or
+bioRxiv subject collections, and collect what is new into a feed
+refreshed in the background.
+
+bioRxiv has no search, so its subscriptions are whole subjects: tick
+as many of the 27 collections as you read and each gets its own feed,
+with a preprint listed under two subjects appearing under both. The
+rows arrive complete — title, authors, abstract, DOI and date come
+straight from the feed, with no further lookups. To search preprints
+by term instead, use **Discover → Preprints**, which asks Europe
+PMC.
 
 ## Notes
 - [1] poppler `https://poppler.freedesktop.org/`

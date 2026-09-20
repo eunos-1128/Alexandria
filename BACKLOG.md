@@ -1617,6 +1617,36 @@ Pending features, roughly grouped. Newest at the top of each section.
   DOI suffix says `1996`. Publication year cannot be read off a
   DOI.)
 
+- **PART DONE 2026-09-20 — the bioRxiv half.** `biorxiv.py` parses
+  the subject feeds, `feed.refresh_subscription` gained a
+  `biorxiv_subject` kind, and the Subscriptions window's Add panel
+  gained a **Preprints** mode: a grid of 27 subject toggles, creating
+  one subscription per ticked subject in a single gesture. The "All"
+  view is now grouped by subscription with a header and a per-group
+  cap, rather than a date-sorted union capped at 100 — with 27
+  subjects followed, the flat union showed the busiest feeds and hid
+  the rest, which is the opposite of keeping subjects apart.
+
+  Enrichment is skipped for this kind: the feed already carries title,
+  abstract, authors, DOI and date, and a preprint's readability is not
+  in question, so the thirty Unpaywall lookups a refresh would
+  otherwise make are not made.
+
+  Measured live (2026-09-19): biophysics, bioinformatics and
+  paleontology, 30 rows each, **1.9s for all three**, second pass 0
+  new. Date spans confirm the cap is a count and not a window —
+  biophysics covered 3 days, paleontology 5 months.
+
+  **Still open: arXiv**, which needs its own Atom client and has a
+  real search API, so it is a different shape of subscription (a
+  query, not a subject). And the **preprint-vs-published dedupe**: a
+  preprint and its published version share no DOI, so `discovered`
+  cannot tell that a recommendation is already in the library under
+  another identifier. Title matching is the obvious route and is
+  untouched.
+
+  Original entry:
+
 - **Preprint subscriptions: arXiv and bioRxiv.** Wanted so that
   standing search terms quietly accumulate recommendations in the
   background, without the user going looking.

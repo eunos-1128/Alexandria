@@ -27,8 +27,23 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gtk, Pango
 
-from . import feed, index, opener
+from . import biorxiv, feed, index, opener
 from .markup import safe_pango_markup
+
+# Two characters, in the subscription strip: journal, topic, preprint
+# subject.
+# How many cards the body draws. Per group in the "All" view, so a
+# quiet subject is not pushed off the page by a busy one; a selected
+# subscription gets the larger single-feed page.
+_PER_GROUP_CAP = 8
+_ALL_VIEW_CAP = 100
+
+_KIND_GLYPH = {
+    "journal_issn": "[J]",
+    "openalex_query": "[T]",
+    "crossref_query": "[T]",
+    "biorxiv_subject": "[P]",
+}
 
 
 def _known_author_chip(matched, window):
@@ -206,8 +221,13 @@ class FeedWindow(Adw.Window):
             "toggled", self._on_add_mode_toggled, "journal")
         self._add_topic_btn.connect(
             "toggled", self._on_add_mode_toggled, "topic")
+        self._add_preprint_btn = Gtk.ToggleButton(label="Preprints")
+        self._add_preprint_btn.set_group(self._add_journal_btn)
+        self._add_preprint_btn.connect(
+            "toggled", self._on_add_mode_toggled, "preprint")
         mode_row.append(self._add_journal_btn)
         mode_row.append(self._add_topic_btn)
+        mode_row.append(self._add_preprint_btn)
         b.append(mode_row)
 
         # Entry: journal-name lookup OR topic free-text.
@@ -223,6 +243,31 @@ class FeedWindow(Adw.Window):
         self._add_action_btn.add_css_class("suggested-action")
         self._add_action_btn.connect("clicked", self._on_add_query)
         b.append(self._add_action_btn)
+
+        # bioRxiv subject grid. Toggles rather than a combo, because
+        # several subjects can be followed at once — which bioRxiv's
+        # own subject menu does not allow. One subscription row per
+        # subject: `discovered` is keyed UNIQUE(subscription_id, doi),
+        # so per-subject rows give per-subject dedupe for free, and a
+        # cross-listed preprint lands in both subjects rather than
+        # being collapsed into one. Cross-listing is information.
+        self._subject_toggles = {}
+        grid = Gtk.FlowBox()
+        grid.set_selection_mode(Gtk.SelectionMode.NONE)
+        grid.set_max_children_per_line(3)
+        grid.set_row_spacing(2)
+        grid.set_column_spacing(2)
+        for slug in biorxiv.SUBJECTS:
+            t = Gtk.ToggleButton(label=biorxiv.subject_label(slug))
+            t.add_css_class("flat")
+            self._subject_toggles[slug] = t
+            grid.append(t)
+        self._subject_scroller = Gtk.ScrolledWindow()
+        self._subject_scroller.set_min_content_height(230)
+        self._subject_scroller.set_min_content_width(440)
+        self._subject_scroller.set_child(grid)
+        self._subject_scroller.set_visible(False)
+        b.append(self._subject_scroller)
 
         # Results area (journal mode only — topic mode adds directly
         # without a picker step). Each row is clickable; clicking
@@ -258,7 +303,7 @@ class FeedWindow(Adw.Window):
                 "<span size='small' alpha='65%'>Pick a journal from "
                 "the list, or switch to Topic for a free-text "
                 "OpenAlex search</span>")
-        else:
+        elif mode == "topic":
             self._add_entry.set_placeholder_text(
                 "Topic — e.g. T cells")
             self._add_action_btn.set_label("Add topic subscription")
@@ -266,9 +311,24 @@ class FeedWindow(Adw.Window):
                 "<span size='small' alpha='65%'>OpenAlex full-text "
                 "search, sorted newest first, type:article|review|"
                 "preprint</span>")
+        else:
+            self._add_action_btn.set_label("Follow selected subjects")
+            self._add_status.set_markup(
+                "<span size='small' alpha='65%'>bioRxiv has no search, "
+                "so you follow whole subject collections. Each keeps "
+                "its own feed; a preprint listed under two subjects "
+                "appears in both.</span>")
+        # The entry is for the two query modes; preprints choose from
+        # a fixed list, because a misspelt subject answers 200 with no
+        # items and would look like a quiet week for ever.
+        self._add_entry.set_visible(mode != "preprint")
+        self._subject_scroller.set_visible(mode == "preprint")
         _clear_box(self._add_results)
 
     def _on_add_query(self, _w):
+        if self._add_mode == "preprint":
+            self._do_add_subjects()
+            return
         q = (self._add_entry.get_text() or "").strip()
         if not q:
             self._add_status.set_markup(
@@ -378,6 +438,53 @@ class FeedWindow(Adw.Window):
         # idle cycle.
         self._add_sub_button.get_popover().popdown()
 
+    def _do_add_subjects(self):
+        """Follow every ticked subject — N subscriptions from one
+        gesture, unlike the journal and topic paths which create one.
+
+        Already-followed subjects are skipped rather than refused, so
+        ticking a few more later does the obvious thing."""
+        chosen = [slug for slug, btn in self._subject_toggles.items()
+                  if btn.get_active()]
+        if not chosen:
+            self._add_status.set_markup(
+                "<span size='small' foreground='#cc3333'>"
+                "Tick at least one subject.</span>")
+            return
+        existing = {s["query"] for s in index.list_subscriptions(self.conn)
+                    if s["kind"] == "biorxiv_subject"}
+        added = []
+        for slug in chosen:
+            if slug in existing:
+                continue
+            try:
+                sid = index.add_subscription(
+                    self.conn, "biorxiv_subject",
+                    "bioRxiv: " + biorxiv.subject_label(slug), slug)
+            except Exception as e:
+                self._add_status.set_markup(
+                    "<span size='small' foreground='#cc3333'>"
+                    "Could not add {}: {}</span>".format(
+                        GLib.markup_escape_text(biorxiv.subject_label(slug)),
+                        GLib.markup_escape_text(str(e))))
+                return
+            added.append(sid)
+            self._subject_toggles[slug].set_active(False)
+        if not added:
+            self._add_status.set_markup(
+                "<span size='small' alpha='75%'>Already following "
+                "those.</span>")
+            return
+        self._add_status.set_markup(
+            "<span size='small'>Following {} subject{}. Fetching "
+            "first batch…</span>".format(
+                len(added), "" if len(added) == 1 else "s"))
+        self._refresh_subscriptions_strip()
+        for sid in added:
+            threading.Thread(target=self._initial_fetch,
+                             args=(sid,), daemon=True).start()
+        self._add_sub_button.get_popover().popdown()
+
     def _do_add_topic(self, query):
         # Topic subscriptions just store the query string; the
         # fetcher hits OpenAlex with it.
@@ -435,7 +542,7 @@ class FeedWindow(Adw.Window):
         self._subs_flow.append(all_pill)
 
         for s in subs:
-            kind_glyph = "[J]" if s["kind"] == "journal_issn" else "[T]"
+            kind_glyph = _KIND_GLYPH.get(s["kind"], "[T]")
             label = "{} {}".format(kind_glyph, s["name"])
             pill = self._build_sub_pill(
                 s["id"], label,
@@ -547,17 +654,17 @@ class FeedWindow(Adw.Window):
         target_subs = (
             [s for s in subs if s["id"] == self.selected_sub_id]
             if self.selected_sub_id is not None else subs)
-        rows = []
+        per_sub = []
+        total = 0
         for s in target_subs:
-            for d in index.discovered_for(self.conn, s["id"], limit=100):
-                rows.append((s, d))
-        # Sort union by published_date desc; rows without dates
-        # fall to the end.
-        rows.sort(
-            key=lambda sr: (sr[1].get("published_date") or "",
-                            sr[1].get("fetched_at") or ""),
-            reverse=True)
-        if not rows:
+            got = list(index.discovered_for(self.conn, s["id"], limit=100))
+            got.sort(key=lambda d: (d.get("published_date") or "",
+                                    d.get("fetched_at") or ""),
+                     reverse=True)
+            total += len(got)
+            if got:
+                per_sub.append((s, got))
+        if not total:
             empty = Gtk.Label(xalign=0.5)
             empty.set_markup(
                 "<span alpha='65%'>No articles fetched yet.</span>")
@@ -565,8 +672,42 @@ class FeedWindow(Adw.Window):
             self.feed_box.append(empty)
             return
         self._refresh_author_trail()
-        for sub, art in rows[:100]:
-            self.feed_box.append(self._build_feed_card(sub, art))
+
+        if self.selected_sub_id is not None:
+            # One subscription selected: no headers needed, and a
+            # hundred rows of one feed is a reasonable page.
+            for art in per_sub[0][1][:_ALL_VIEW_CAP]:
+                self.feed_box.append(self._build_feed_card(per_sub[0][0], art))
+            return
+
+        # "All": grouped by subscription, not merged into one
+        # date-sorted list. With 27 bioRxiv subjects followed, a flat
+        # union capped at 100 showed a handful of the busiest feeds
+        # and hid the rest entirely — and a date sort is the opposite
+        # of "keep the subjects apart", which is why one row per
+        # subject exists at all. Each group is capped instead, so a
+        # quiet subject is always visible.
+        for sub, arts in per_sub:
+            header = Gtk.Label(xalign=0.0)
+            header.set_markup(
+                "<b>{}</b><span alpha='60%'>  ·  {} item{}</span>".format(
+                    safe_pango_markup(sub["name"] or "Subscription"),
+                    len(arts), "" if len(arts) == 1 else "s"))
+            header.set_margin_top(14)
+            header.set_margin_start(8)
+            self.feed_box.append(header)
+            for art in arts[:_PER_GROUP_CAP]:
+                self.feed_box.append(self._build_feed_card(sub, art))
+            if len(arts) > _PER_GROUP_CAP:
+                more = Gtk.Label(xalign=0.0)
+                more.set_markup(
+                    "<span size='small' alpha='60%'>"
+                    "+{} more — click the “{}” tab above to see "
+                    "them all</span>".format(
+                        len(arts) - _PER_GROUP_CAP,
+                        safe_pango_markup(sub["name"] or "")))
+                more.set_margin_start(16)
+                self.feed_box.append(more)
 
     def _build_feed_card(self, sub, art):
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)

@@ -490,6 +490,13 @@ def refresh_subscription(conn, subscription, limit=FEED_FETCH_ROWS):
     elif kind == "crossref_query":
         # Reserved for future use; not wired into the UI yet.
         articles = []
+    elif kind == "biorxiv_subject":
+        # One subject collection per subscription: bioRxiv has no
+        # search, so the subject *is* the query. The feed carries
+        # title, abstract, authors, DOI and date, so unlike the other
+        # kinds these rows need no enrichment at all.
+        from . import biorxiv
+        articles = biorxiv.fetch_subject(query)[:limit]
     else:
         return 0, 0
     new_count = 0
@@ -503,6 +510,12 @@ def refresh_subscription(conn, subscription, limit=FEED_FETCH_ROWS):
         # persisted, the badge just won't appear.
         doi = a.get("doi")
         if not doi:
+            continue
+        if kind == "biorxiv_subject":
+            # The feed already said everything Unpaywall could:
+            # a preprint is readable, and pdf_fetch constructs the
+            # PDF URL from the DOI. Thirty lookups per refresh to
+            # learn that would be rude and slow.
             continue
         try:
             unpw = metrics.fetch_oa_locations(doi)
