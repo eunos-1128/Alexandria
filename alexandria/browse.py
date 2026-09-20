@@ -2186,10 +2186,10 @@ class BrowserWindow(Adw.ApplicationWindow):
         self.library_watcher.reconcile_startup()
         self.connect("close-request", self._on_close_request)
 
-        # Warn if pdfx isn't available — metadata extraction is much
-        # weaker without it.
-        if not extract._have_pdfx():
-            GLib.idle_add(self._warn_no_pdfx)
+        # Warn if pypdf isn't available — without it nothing can read
+        # the PDF's own metadata, XMP or /Info.
+        if not extract._can_read_pdf_metadata():
+            GLib.idle_add(self._warn_no_pypdf)
 
         # Warn (once per process) if pdftoppm isn't on PATH — without
         # it `thumbnail.make_thumbnail` silently produces no PNG, so
@@ -2201,18 +2201,18 @@ class BrowserWindow(Adw.ApplicationWindow):
             BrowserWindow._pdftoppm_warned = True
             GLib.idle_add(self._warn_no_pdftoppm)
 
-    def _warn_no_pdfx(self):
+    def _warn_no_pypdf(self):
         dlg = Gtk.AlertDialog()
         dlg.set_modal(True)
-        dlg.set_message("pdfx not installed")
+        dlg.set_message("pypdf not installed")
         dlg.set_detail(
-            "The 'pdfx' Python module is not importable in this "
+            "The 'pypdf' Python module is not importable in this "
             "environment.\n\n"
-            "Metadata extraction will be compromised — titles, authors, "
-            "DOI and journal will be sourced only from the PDF's basic "
-            "/Info dictionary (often empty), with CrossRef enrichment "
-            "as a fallback.\n\n"
-            "To fix: pip install pdfx")
+            "Metadata extraction will be compromised — nothing can "
+            "read the PDF's own XMP packet or /Info dictionary, so "
+            "titles, authors, DOI and journal will come only from the "
+            "page text, with CrossRef enrichment as a fallback.\n\n"
+            "To fix: pip install pypdf")
         dlg.set_buttons(["OK"])
         dlg.set_default_button(0)
         dlg.show(self)

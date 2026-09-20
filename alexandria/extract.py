@@ -1,7 +1,8 @@
 """Best-effort metadata extraction from a PDF.
 
-Tries pdfx first (rich XMP parsing), then pypdf, then a stub. The caller
-can later overlay better metadata from CrossRef / arXiv lookups.
+Reads the PDF's own metadata — the XMP packet first, then the `/Info`
+dictionary — and falls back to a stub. The caller can later overlay
+better metadata from CrossRef / arXiv lookups.
 """
 
 import json
@@ -9,7 +10,7 @@ import os
 import re
 import shutil
 import subprocess
-import sys
+import xml.etree.ElementTree as ET
 import urllib.parse
 import urllib.request
 
@@ -25,19 +26,13 @@ try:
 except ImportError:
     HAVE_PYPDF = False
 
-# pdfx is optional; when present, it gives us much richer XMP parsing
-# than pypdf's /Info dict. We use it as a Python library (no
-# subprocess) — pdf.summary returns the same shape as `pdfx -j` did.
-try:
-    import pdfx as _pdfx
-    HAVE_PDFX = True
-except ImportError:
-    _pdfx = None
-    HAVE_PDFX = False
+def _can_read_pdf_metadata():
+    """Whether anything can read a PDF's own metadata.
 
-
-def _have_pdfx():
-    return HAVE_PDFX
+    `browse` asks before warning that extraction will be poor. It used
+    to mean "is pdfx importable"; reading XMP is no longer an optional
+    extra, so the honest question is whether pypdf is there."""
+    return HAVE_PYPDF
 
 
 _DOI_RE = re.compile(r"\b10\.\d{4,9}/[-._;()/:A-Z0-9]+", re.IGNORECASE)
@@ -273,7 +268,12 @@ def _is_garbage_title(s):
         return True
     if low.startswith("microsoft word -"):
         return True
-    if low.endswith(".dvi") or low.endswith(".tex") or low.endswith(".docx"):
+    # A filename left in the title slot. `.pdf` joins the list
+    # because some producers write the file's own name there —
+    # "a25349.pdf" is a real example — and a paper whose title is a
+    # filename is worse than a paper with no title, which at least
+    # invites the page-1 scrape and the DOI lookup.
+    if low.endswith((".dvi", ".tex", ".docx", ".doc", ".pdf", ".rtf")):
         return True
     # Publisher placeholder titles — same string for every paper from
     # the same imprint. Match leniently because em-dash / en-dash /
@@ -339,68 +339,126 @@ def _split_authors(s):
     return [s.strip()] if s.strip() else []
 
 
-# How long pdfx may take before we stop waiting for it. Measured
-# across a real library: 0.5 s for a 6-page paper, 3.1 s for 21
-# pages. The budget is generous against that, and exists only to
-# bound the pathological case below.
-_PDFX_BUDGET_S = 25
+_RDF_NS = "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+_RDF = "{%s}" % _RDF_NS
+
+# Namespace prefixes worth keying by name as well as by URI, because
+# the field readers below ask for them that way. Everything else is
+# keyed by its URI alone.
+_XMP_PREFIXES = {
+    "http://purl.org/dc/elements/1.1/": "dc",
+    "http://crossref.org/crossmark/1.0/": "crossmark",
+    "http://ns.adobe.com/pdfx/1.3/": "pdfx",
+    "http://ns.adobe.com/pdf/1.3/": "pdf",
+    "http://ns.adobe.com/xap/1.0/": "xap",
+}
 
 
-def _has_xmp(pdf_path):
-    """True when the PDF carries an XMP metadata stream.
+def _xmp_values(el):
+    """One XMP property's value: the strings inside an rdf:Alt / Seq /
+    Bag, or the element's own text.
 
-    The gate on running pdfx at all, because **XMP is the only thing
-    we take from it** — `_extract_from_pdfx` reads `summary["metadata"]`
-    and nothing else. A document without that stream cannot yield
-    anything, and pdfx would parse every page to discover that.
+    A list is kept as a list — `dc:creator` is how a paper's authors
+    arrive, and flattening it to the first name would lose the rest."""
+    items = [(li.text or "").strip() for li in el.iter(_RDF + "li")]
+    items = [i for i in items if i]
+    if items:
+        return items[0] if len(items) == 1 else items
+    text = (el.text or "").strip()
+    return text or None
 
-    Costs 13–21 ms, measured; pdfx costs seconds at best."""
+
+def _xmp_metadata(pdf_path):
+    """The PDF's own metadata, as `{namespace: {property: value}}`
+    with the `/Info` dictionary flattened alongside.
+
+    This is the shape `pdfx.PDFx().summary["metadata"]` had, kept
+    deliberately: the field readers below encode a lot of
+    publisher-specific knowledge — which PRISM version Science
+    Advances writes, where Wiley hides the article DOI, that Elsevier
+    stamps `pdfx:doi` — and `metrics.biblio_from_raw` reads the PRISM
+    block straight out of the sidecar's stored copy. Changing the
+    shape would mean rewriting all of that and invalidating what is
+    already on disk.
+
+    Namespaces are keyed by URI *and*, where we have a name for them,
+    by prefix. The duplication is a few hundred bytes and means both
+    conventions resolve.
+
+    Replaces pdfx, which was archived in 2023, pins
+    `pdfminer.six==20201018` exactly, and parsed every page of the
+    document to build a reference list nothing here reads — 147s
+    across 40 papers against 0.5s for this, and on one 44-page paper
+    it had not finished after five minutes."""
     if not HAVE_PYPDF:
-        return False
+        return {}
+    md = {}
     try:
-        return PdfReader(pdf_path).xmp_metadata is not None
+        reader = PdfReader(pdf_path)
     except Exception:
-        return False
-
-
-def _run_pdfx(pdf_path, budget=_PDFX_BUDGET_S):
-    """The pdfx library's summary dict for `pdf_path` (keys `source`,
-    `metadata`, `references`), or None.
-
-    **In a subprocess, on a clock.** `PDFx()` parses the whole
-    document to build its reference list, which we do not use, and on
-    one real paper — 44 pages, iText-produced, no XMP — that ran for
-    over five minutes at 100% CPU and had not finished. Extraction is
-    serialised behind `_extract_gate`, so a file like that does not
-    merely import slowly: it stops every other import until it
-    finishes, which is what "the main window never updated" looked
-    like from outside.
-
-    A thread could not fix it, because a Python thread cannot be
-    stopped. A subprocess can be killed, and costs 0.12 s to start —
-    a fair price for a guarantee, and only paid by files that have
-    XMP worth reading."""
-    if not HAVE_PDFX or not _has_xmp(pdf_path):
-        return None
-    code = ("import json,sys,pdfx;"
-            "print(json.dumps(pdfx.PDFx(sys.argv[1]).summary, default=str))")
+        return {}
     try:
-        done = subprocess.run(
-            [sys.executable, "-c", code, pdf_path],
-            capture_output=True, timeout=budget)
-    except subprocess.TimeoutExpired:
-        print("[extract] pdfx gave up after {}s on {}".format(
-            budget, os.path.basename(pdf_path)))
-        return None
+        for key, value in (reader.metadata or {}).items():
+            name = str(key).lstrip("/")
+            try:
+                md[name] = str(value)
+            except Exception:
+                continue
     except Exception:
-        return None
-    if done.returncode != 0 or not done.stdout:
-        return None
+        pass
     try:
-        data = json.loads(done.stdout.decode("utf-8", "replace"))
-    except ValueError:
-        return None
-    return data if isinstance(data, dict) else None
+        xmp = reader.xmp_metadata
+        raw = xmp.stream.get_data() if xmp is not None else None
+    except Exception:
+        raw = None
+    if not raw:
+        return md
+    try:
+        root = ET.fromstring(raw)
+    except ET.ParseError:
+        return md
+
+    def store(ns_uri, local, value):
+        if value in (None, ""):
+            return
+        for key in filter(None, (ns_uri, _XMP_PREFIXES.get(ns_uri))):
+            md.setdefault(key, {})[local] = value
+
+    for desc in root.iter(_RDF + "Description"):
+        # Properties come as attributes on rdf:Description …
+        for qname, value in desc.attrib.items():
+            if not qname.startswith("{"):
+                continue
+            ns_uri, local = qname[1:].split("}", 1)
+            if ns_uri == _RDF_NS:
+                continue
+            store(ns_uri, local, value.strip())
+        # … or as child elements, which is the commoner form.
+        for child in desc:
+            if not child.tag.startswith("{"):
+                continue
+            ns_uri, local = child.tag[1:].split("}", 1)
+            if ns_uri == _RDF_NS:
+                continue
+            store(ns_uri, local, _xmp_values(child))
+    return md
+
+
+def _flat_key(md, name):
+    """A top-level metadata value by case-insensitive name.
+
+    The flat keys come from the PDF's `/Info` dictionary, where the
+    same field is spelled to each producer's taste: arXiv writes
+    `/DOI`, Elsevier `/doi`."""
+    exact = md.get(name)
+    if isinstance(exact, str) and exact.strip():
+        return exact.strip()
+    want = name.lower()
+    for key, value in md.items():
+        if (isinstance(key, str) and key.lower() == want
+                and isinstance(value, str) and value.strip()):
+            return value.strip()
+    return None
 
 
 def _first_str(v):
@@ -419,11 +477,21 @@ def _first_str(v):
     return None
 
 
-def _extract_from_pdfx(pdf_path):
-    data = _run_pdfx(pdf_path)
-    if not data:
+def _extract_from_xmp(pdf_path):
+    """Title / authors / DOI / journal from the PDF's own metadata."""
+    return _fields_from_metadata(_xmp_metadata(pdf_path))
+
+
+def _fields_from_metadata(md):
+    """Pick the fields out of a metadata dict.
+
+    Separate from `_xmp_metadata` because the two answer different
+    questions — where the metadata comes from, and which of its many
+    near-synonymous slots to believe — and because keeping them apart
+    let the pypdf reader be compared against pdfx's output with the
+    same field logic running over both."""
+    if not md:
         return None
-    md = data.get("metadata", {}) or {}
     out = {"title": None, "authors": [], "year": None,
            "doi": None, "journal": None, "raw": md}
 
@@ -463,17 +531,26 @@ def _extract_from_pdfx(pdf_path):
     # the same DOI into different namespaces; some only one of them.
     # `dc.identifier` is typically prefixed with "doi:" — _DOI_RE
     # below picks the bare DOI back out.
-    out["doi"] = (_first_str(md.get("doi"))
-                  or _first_str(prism.get("doi"))
-                  or _first_str(prism.get("identifier"))
-                  or _first_str(crossmark.get("DOI"))
-                  or _first_str(crossmark.get("doi"))
-                  or _first_str(pdfx_ns.get("doi"))
-                  or _first_str(dc.get("identifier")))
-    if out["doi"]:
-        m = _DOI_RE.search(out["doi"])
+    # Case-insensitively for the flat key: it comes from the PDF's
+    # /Info dictionary, where arXiv writes "/DOI" and Elsevier "/doi".
+    candidates = [_flat_key(md, "doi"),
+                  _first_str(prism.get("doi")),
+                  _first_str(prism.get("identifier")),
+                  _first_str(crossmark.get("DOI")),
+                  _first_str(crossmark.get("doi")),
+                  _first_str(pdfx_ns.get("doi")),
+                  _first_str(dc.get("identifier"))]
+    # A slot that holds no DOI is not an answer. dc:identifier in
+    # particular is often a landing-page URL — arXiv writes
+    # "https://arxiv.org/abs/2506.14430v1" there while the real DOI
+    # sits in /Info — and keeping that as the DOI stops every later
+    # lookup, because the record then *has* one.
+    out["doi"] = None
+    for cand in candidates:
+        m = _DOI_RE.search(cand or "")
         if m:
             out["doi"] = m.group(0).rstrip(".,;")
+            break
 
     out["journal"] = (_first_str(prism.get("publicationName"))
                       or _first_str(prism.get("publication"))
@@ -1128,7 +1205,7 @@ def _enrich(result, pdf_path, on_progress=None):
     is_si = _is_supplementary(pdf_path, text)
     if is_si:
         result["is_supplementary"] = True
-        # Page-1 / pdfx scrapes will have lifted the SI cover's title
+        # Page-1 / metadata scrapes will have lifted the SI cover's title
         # and authors. They describe the parent paper but routinely get
         # truncated mid-sentence (the comma after "Persistence,"
         # becomes the title boundary; everything after becomes
@@ -1230,8 +1307,8 @@ def extract_from_pdf(pdf_path, on_progress=None):
     out = {"title": None, "authors": [], "year": None,
            "doi": None, "journal": None, "raw": {}}
 
-    if _have_pdfx():
-        result = _extract_from_pdfx(pdf_path)
+    if _can_read_pdf_metadata():
+        result = _extract_from_xmp(pdf_path)
         if result is not None:
             return _enrich(result, pdf_path, on_progress)
 

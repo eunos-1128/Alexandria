@@ -90,8 +90,8 @@ the optional built-in terminal.
 
 The Python dependencies come from pip, and cannot come from pacman:
 Arch ships `python-bibtexparser` 1.4.4, while `bibtex.py` uses the
-v2 `parse_string` / middlewares API, and `pdfx` and `citeproc-py` are
-not in the repositories at all.
+v2 `parse_string` / middlewares API, and `citeproc-py` is not in the
+repositories at all.
 
 Arch also marks its system Python as externally managed (PEP 668), so
 `pip install --user` refuses to run. Use a virtualenv that can still

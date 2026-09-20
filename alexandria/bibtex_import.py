@@ -297,7 +297,7 @@ def attach_pdf_to_ghost(conn, ghost_row, source_pdf_path, library_root):
          reject.
       2. Copy the PDF into LIBRARY_ROOT as `<bibtex_key>.pdf` (with
          numeric suffix on collision).
-      3. Run the standard PDF import (pdfx + OpenAlex enrichment).
+      3. Run the standard PDF import (metadata + OpenAlex enrichment).
       4. Merge ghost's curation onto the new sidecar:
          - always:  bibtex_key, bibtex_type, bibtex_extra, mark
          - if non-empty: notes, tags, highlights, published_version

@@ -16,7 +16,8 @@ dependencies = [
     # viewer.py renders pages to a cairo.ImageSurface directly, so
     # this is a first-order dependency, not just PyGObject's.
     "pycairo",
-    "pdfx",
+    # pypdf reads both the /Info dictionary and the XMP packet,
+    # which is all `extract` ever wanted from the archived `pdfx`.
     "pypdf",
     # bibtexparser v2 has the parse_string / middlewares API that
     # bibtex.py uses; v1 doesn't. v2 is still pre-release on PyPI,

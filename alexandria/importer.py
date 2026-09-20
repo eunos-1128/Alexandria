@@ -719,7 +719,7 @@ def refresh_pdf(conn, pdf_path):
 # One dropped PDF reaches import_pdf up to three times at once: the
 # drop handler imports the file it just copied in, and the watcher
 # fires its own imports for the CREATED and CHANGES_DONE_HINT events
-# on the same path. Each pass runs _build_record (pdfx / pypdf — pure
+# on the same path. Each pass runs _build_record (pypdf — pure
 # Python, so it holds the GIL for seconds on a figure-heavy PDF), and
 # the concurrent passes starve the GTK main loop: measured 2026-08-30
 # at 76 s of main-loop stalls for a single 25-page import, the worst
@@ -734,11 +734,11 @@ _inflight_lock = threading.Lock()
 _inflight = {}                 # abspath -> threading.Event
 INFLIGHT_WAIT_SECONDS = 120
 
-# Extraction (pdfx / pypdf) is pure Python, so it holds the GIL.
+# Extraction (pypdf) is pure Python, so it holds the GIL.
 # Several producers reach it at once during a bulk import — the
 # folder import, the watcher's per-file threads, and the startup
 # reconcile — and an all-threads dump on 2026-08-30 caught three of
-# them inside _run_pdfx together, each running at a third speed
+# them inside the metadata read together, each at a third speed
 # while the paper count crawled. Concurrency buys nothing for
 # CPU-bound Python; serialising it is faster and keeps the machine
 # responsive. (The real answer is extraction out of process — see
