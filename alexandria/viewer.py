@@ -1335,7 +1335,11 @@ class PdfViewerWindow(Gtk.Window):
             cell.append(area)
             cell.append(num)
             click = Gtk.GestureClick()
-            click.connect("released", lambda *_a, p=i: self._goto(p + 1))
+            # `_goto` counts from zero, and `i` already is a page
+            # index — the `+ 1` belongs to the label above, which is
+            # what the reader reads, not to the jump. Clicking the
+            # cell labelled "2" used to arrive at page 3.
+            click.connect("released", lambda *_a, p=i: self._goto(p))
             cell.add_controller(click)
             cell.set_cursor(Gdk.Cursor.new_from_name("pointer", None))
             self.thumb_box.append(cell)
@@ -1418,8 +1422,10 @@ class PdfViewerWindow(Gtk.Window):
             row.append(num)
 
             click = Gtk.GestureClick()
+            # Also an index, not a page number: `dest_page_index`
+            # already turned Poppler's 1-based destination into one.
             click.connect("released",
-                          lambda *_a, p=page: self._goto(p + 1))
+                          lambda *_a, p=page: self._goto(p))
             row.add_controller(click)
             row.set_cursor(Gdk.Cursor.new_from_name("pointer", None))
         return row
