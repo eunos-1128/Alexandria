@@ -4,11 +4,11 @@ A GTK4-based organizer/reference manager for scientific PDFs.
 
 Alexandria is designed to be a personal and local store. It is not
 an interface where you upload your document collection to a cloud
-server somewhere. You PDF catalogue won't be (can't be) part of
-someone else's data harvesting. There is no crowdsourcing.
-If you want your reading habits and project lists tracked by
-corporations, and suggested to others then Alexandria is not
-for you.
+server somewhere. There is no crowdsourcing.
+Your PDF catalogue won't be (can't be) part of someone else's data
+harvesting. If you want your reading habits and project lists tracked
+by corporations, and suggested to others then Alexandria is not for
+you.
 
 Alexandria has 3 main "views"
   - PDF viewer: for reading and annotations
@@ -23,10 +23,6 @@ Alexandria uses OpenAlex and CrossRef network calls and PDF text
 extraction to associate metadata [2] with PDF files (`.alexandria`
 extension, but JSON inside) - these are the "sidecars."
 
-It would not be very wrong to describe Alexandria as a desktop
-interface to OpenAlex that knows about PDF files and citation
-formats.
-
 The file store is a plain old directory with PDF files in it.
 
 An SQLite database is constructed using the sidecars for fast
@@ -35,6 +31,10 @@ searching.
 There are subscriptions and discovery.
 
 Alexandria uses JATS where it can.
+
+It would not be very wrong to describe Alexandria as a desktop
+interface to OpenAlex that knows about PDF files and citation
+formats.
 
 Alexandria is intended to be XDG Base Directory Protocol [3] compliant. It
 writes, by default, to `$HOME/Documents/Alexandria` and the database to
