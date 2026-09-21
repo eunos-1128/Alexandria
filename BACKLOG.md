@@ -2437,6 +2437,12 @@ Pending features, roughly grouped. Newest at the top of each section.
       derived from Eigenfactor, is probably the closer analogue for
       an author-level number than Eigenfactor itself. Check.
 
+  Worth reading alongside:
+  [Citation impact](https://en.wikipedia.org/wiki/Citation_impact) —
+  the survey of the whole family, split article / author / journal
+  level, with the criticism section these measures all earn and the
+  raw-count-versus-rate distinction this question turns on.
+
   **Candidate normalisations for us**, once that is understood:
 
     - *Divide by the author's own citation count* — "the people who

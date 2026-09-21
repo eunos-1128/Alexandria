@@ -144,6 +144,21 @@ software, where one paper usually *is* the career's visible surface.
    "85,493 citations" invites the reader to think something is
    broken. The tooltip explains it; the chip alone does not.
 
+## Further reading
+
+* **[Citation impact](https://en.wikipedia.org/wiki/Citation_impact)**
+  (Wikipedia) — the survey this note's comparison table is a narrow
+  slice of. Organised article-level / author-level / journal-level,
+  which is a cleaner cut than the table above, and it carries the
+  *Criticism* section that every one of these measures earns: the
+  field and career-length dependence, Goodhart's law once a number is
+  used for hiring, and the several ways a count can be gamed. It also
+  makes the raw-count versus rate distinction ("citation frequency")
+  that the normalisation question below turns on.
+* Bergstrom & West on Eigenfactor, for the random-walk formulation
+  and what its normalisation actually normalises. See the backlog
+  entry: this has to be read before any of it is borrowed.
+
 ## If it were revisited
 
 * Normalise optionally by the author's total citations, giving a
