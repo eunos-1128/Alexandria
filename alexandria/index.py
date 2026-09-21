@@ -611,8 +611,12 @@ def get_author_score(conn, openalex_id):
         (openalex_id,)).fetchone()
     if row is None:
         return None
+    complete = row["complete"] if "complete" in row.keys() else None
     out = {"computed_at": row["computed_at"],
-           "self_excluded": bool(row["self_excluded"])}
+           "self_excluded": bool(row["self_excluded"]),
+           # None for a row written before the column existed: not
+           # "incomplete", but "we cannot say".
+           "complete": None if complete is None else bool(complete)}
     for kind in ("software", "method", "idea"):
         total = row["{}_total".format(kind)]
         n_citing = row["{}_n_citing".format(kind)]
@@ -632,9 +636,10 @@ def set_author_score(conn, openalex_id, result, self_excluded=True):
     n_works} plus `computed_at`."""
     if not openalex_id or not result:
         return
-    cols = ["openalex_id", "self_excluded", "computed_at"]
+    cols = ["openalex_id", "self_excluded", "computed_at", "complete"]
     vals = [openalex_id, 1 if self_excluded else 0,
-            result.get("computed_at") or ""]
+            result.get("computed_at") or "",
+            1 if result.get("complete", True) else 0]
     for kind in ("software", "method", "idea"):
         b = result.get(kind) or {}
         cols += ["{}_total".format(kind),
@@ -971,6 +976,21 @@ def add_author_trail(conn, authorship):
         "SELECT * FROM authors.author_trail WHERE key = ?", (key,)).fetchone())
 
 
+def _migrate_author_scores(conn):
+    """Add `complete` to an existing citing-impact cache.
+
+    Rows written before this column existed cannot say whether their
+    walk finished, so they are left NULL and
+    `author_works._author_score_is_fresh` treats an impossible
+    shape — works in a bucket, no citers at all — as the truncation
+    it almost certainly was."""
+    cols = {r[1] for r in
+            conn.execute("PRAGMA authors.table_info(author_scores)")}
+    if "complete" not in cols:
+        conn.execute("ALTER TABLE authors.author_scores "
+                     "ADD COLUMN complete INTEGER")
+
+
 def _migrate_author_trail(conn):
     """Add `first_publication_year` to an existing trail table.
 
@@ -1302,6 +1322,7 @@ def attach_authors_db(conn, path=None):
     conn.execute("ATTACH DATABASE ? AS authors", (dest,))
     conn.execute("PRAGMA authors.journal_mode=WAL")
     conn.executescript(CREATE_AUTHOR_SCORES)
+    _migrate_author_scores(conn)
     conn.executescript(CREATE_AUTHOR_WORKS_CACHE)
     conn.executescript(CREATE_AUTHOR_RELATIONS)
     conn.executescript(CREATE_AUTHOR_FUNDING)

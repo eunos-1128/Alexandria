@@ -1264,8 +1264,18 @@ def compute_citing_impact(openalex_id, exclude_self_cites=True,
           "method":   {...},
           "idea":     {...},
           "computed_at": iso-date,
+          "complete": bool,      # False if any walk was cut short
+          "works_walked": int,
+          "works_truncated": int,
         }
     or None when the author ID is malformed.
+
+    **`complete` is the one field a caller must not ignore.** A
+    bucket reading zero because a rate limit ended the walk is
+    indistinguishable, in the numbers alone, from a bucket reading
+    zero because nobody cited that work — which is how a cached row
+    came to claim that the author of SHELX has five software papers
+    and no citers at all.
 
     `top_n` caps the per-author cost: we sort works by
     `cited_by_count` desc and only walk the citers of the top
@@ -1359,6 +1369,8 @@ def compute_citing_impact(openalex_id, exclude_self_cites=True,
         "method":   {"total": 0, "seen": set(), "n_works": 0},
         "idea":     {"total": 0, "seen": set(), "n_works": 0},
     }
+    # Works whose citer walk did not run to the end.
+    truncated = set()
     for _wid, kind, _cbc in works:
         buckets[kind]["n_works"] += 1
 
@@ -1371,6 +1383,9 @@ def compute_citing_impact(openalex_id, exclude_self_cites=True,
             "idea":     {"total": 0, "mean": 0.0, "n_citing": 0,
                          "n_works": 0},
             "computed_at": today_iso(),
+            "complete": True,
+            "works_walked": 0,
+            "works_truncated": 0,
         }
 
     # Step 2: for each sampled Work, paginate through papers that
@@ -1404,6 +1419,12 @@ def compute_citing_impact(openalex_id, exclude_self_cites=True,
                          "Accept": "application/json"},
                 timeout=20)
             if data is None:
+                # Rate limit, tripped breaker, timeout. Whatever has
+                # been counted for this work is a floor, not a total,
+                # and the caller must be able to tell: a bucket that
+                # says 0 because nothing answered looks exactly like
+                # a bucket that says 0 because nobody cited.
+                truncated.add(wid)
                 break
             for w in (data.get("results") or []):
                 cid = (w.get("id") or "").rsplit("/", 1)[-1]
@@ -1429,7 +1450,13 @@ def compute_citing_impact(openalex_id, exclude_self_cites=True,
         if polite_delay:
             time.sleep(polite_delay)
 
-    out = {"computed_at": today_iso()}
+    out = {"computed_at": today_iso(),
+           # False when any work's citer walk was cut short. The
+           # totals are then floors, and the caller should neither
+           # present them as final nor keep them for the full TTL.
+           "complete": not truncated,
+           "works_walked": len(works),
+           "works_truncated": len(truncated)}
     for kind, b in buckets.items():
         n = len(b["seen"])
         out[kind] = {

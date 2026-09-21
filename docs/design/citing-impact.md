@@ -18,8 +18,9 @@ the bibliometric furniture.
 * The numbers are large — millions, for a long career — because they
   are sums over citers' citation counts. This is the honest source
   of the "why is that number so big?" reaction.
-* There is a **known defect**: a walk cut short by a rate limit
-  caches its partial total as though it were complete. See
+* A walk cut short by a rate limit used to cache its partial total
+  as though it were complete. Fixed: the result now carries
+  `complete`, and a partial one is never treated as fresh. See
   [Failure modes](#failure-modes).
 
 ## The definition
@@ -55,8 +56,8 @@ Two real cached rows, from this library's `author_scores` table:
 Steinegger's row reads as a career whose software is used and whose
 ideas are built upon, with the second an order of magnitude larger.
 Sheldrick's software row reads as *nothing at all*, which for the
-author of SHELX is plainly false — that is the defect below, not a
-finding.
+author of SHELX is plainly false — that was the defect below, not a
+finding. Rows of that shape are now recomputed rather than believed.
 
 ## Why the split is the interesting part
 
@@ -115,13 +116,21 @@ software, where one paper usually *is* the career's visible surface.
 
 ## Failure modes
 
-1. **A truncated walk is cached as a result.** In the citer loop, a
-   failed request (`data is None` — rate limit, tripped breaker,
-   timeout) `break`s out and whatever had accumulated so far is
-   returned and cached for 30 days. There is no marker to say the
-   number is partial. This is what produced Sheldrick's "5 software
-   works, 0 citers". *A zero is currently indistinguishable from "we
-   could not ask".*
+1. **A truncated walk used to be cached as a result.** In the citer
+   loop, a failed request (`data is None` — rate limit, tripped
+   breaker, timeout) `break`s out. What had accumulated was returned
+   and cached for 30 days with no marker, which is what produced
+   Sheldrick's "5 software works, 0 citers": a zero indistinguishable
+   from "we could not ask".
+
+   **Fixed.** `compute_citing_impact` returns `complete`,
+   `works_walked` and `works_truncated`; the cache stores the flag;
+   `_author_score_is_fresh` refuses a partial row however recent, so
+   it is recomputed rather than shown for a month; and the chip reads
+   "(partial)" instead of "(stale)", a floor being the more important
+   caveat. Rows written before the column exists cannot say, so their
+   *shape* is read instead: works in a bucket with no citing papers at
+   all. On this library that distrusts two rows and leaves nine.
 2. **Classification is title-word matching.** `classify_paper` looks
    for "software", "package", "algorithm", "method" and friends. It
    misses software with a bare name ("MultiCharge: quantum charge
@@ -137,10 +146,6 @@ software, where one paper usually *is* the career's visible surface.
 
 ## If it were revisited
 
-* Record completeness alongside the total — how many works were
-  walked, how many pages were cut short — so a partial result can say
-  so, and a zero can be told from a failure. (1) is a bug, not a
-  caveat, and this is the fix.
 * Normalise optionally by the author's total citations, giving a
   dimensionless "the people who cite me are cited N× as much as I am"
   — comparable across careers in a way the raw sum is not.

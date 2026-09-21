@@ -84,9 +84,38 @@ def _fmt_compact(n):
     return str(n)
 
 
+def _looks_truncated(cached):
+    """True when a cached row's shape says its walk was cut short.
+
+    For rows written before `complete` existed, which cannot say.
+    A bucket holding works but reporting *no citing papers at all*
+    is the signature: the walk broke out of its first page and the
+    zero was kept. It is not quite impossible — a paper genuinely
+    uncited — but for the author of SHELX with five software works
+    it plainly was not that."""
+    if not cached:
+        return False
+    for kind in ("software", "method", "idea"):
+        b = cached.get(kind) or {}
+        if (b.get("n_works") or 0) > 0 and not (b.get("n_citing") or 0):
+            return True
+    return False
+
+
 def _author_score_is_fresh(cached):
-    """True when a cached `author_scores` row is younger than the
-    TTL. Anything older we'll show briefly then refresh."""
+    """True when a cached `author_scores` row is worth showing
+    without recomputing.
+
+    A row whose walk was cut short is never fresh, whatever its age:
+    its totals are floors, and keeping them for the TTL is how a
+    rate limit became a thirty-day lie about somebody's career."""
+    if not cached:
+        return False
+    complete = cached.get("complete")
+    if complete is False:
+        return False
+    if complete is None and _looks_truncated(cached):
+        return False
     when = (cached or {}).get("computed_at")
     if not when:
         return False
@@ -1035,7 +1064,12 @@ class AuthorPage(Gtk.Box):
         if not bits:
             self.citing_impact_lbl.set_visible(False)
             return False
-        stale_marker = " (stale)" if is_stale else ""
+        # "partial" outranks "stale": a number that is a floor is a
+        # more important caveat than a number that is a month old.
+        if result.get("complete") is False:
+            stale_marker = " (partial)"
+        else:
+            stale_marker = " (stale)" if is_stale else ""
         self.citing_impact_lbl.set_markup(
             "<span size='small' alpha='65%'>"
             "Citing-impact: {}{}</span>".format(
