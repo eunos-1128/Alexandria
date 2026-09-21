@@ -210,6 +210,66 @@ Pending features, roughly grouped. Newest at the top of each section.
     happened: a 185-PDF import through the GUI, 172 papers, zero
     errors, and no such message in the terminal.)*
 
+## First outside users
+
+Filed 2026-09-22, when the Flathub submission
+([flathub#10333](https://github.com/flathub/flathub/pull/10333))
+built successfully and it stopped being true that the only user is
+the author. Everything here works today *because* of that fact, and
+stops working the moment it is false.
+
+- **Diagnostics the user can find.** Nearly every fix this month
+  began with a terminal: the sidebar off-by-one, the import that
+  hung, the summary showing raw Markdown. There are **58 `print("[…]`
+  lines** across the package — `[watcher]`, `[metrics]`,
+  `[importer]`, `[open-catalogue]` — and every one goes to stdout.
+  Launched from a desktop icon or from Flathub, that stdout goes
+  nowhere the user will ever look. When a stranger says "it didn't
+  work", there is nothing to ask them for.
+
+  The cheapest useful version: a rotating log file under
+  `$XDG_STATE_HOME/Alexandria/`, written alongside the prints rather
+  than instead of them, and a **Help → Show log** that opens it. The
+  honest version is `logging` with levels, since some of those 58
+  lines are routine chatter and some are failures, and today they are
+  indistinguishable.
+
+  Flatpak makes it sharper: `flatpak run` from a terminal is not
+  something a user will think to do, and `journalctl` is worse.
+
+- **Somewhere obvious to send a bug report.** There is no in-app
+  route to the issue tracker, and no way for a report to carry the
+  version, the runtime, the catalogue layout or the last few log
+  lines. A Help menu item that opens the tracker with a template
+  prefilled — version from `alexandria.__version__`, whether it is a
+  Flatpak, Python and GTK versions — costs little and changes what
+  arrives from "it crashed" into something actionable.
+
+- **The first run is silent but degraded.** Already filed under
+  `## UI` ("First run writes no config file…"), and Flathub raises
+  its priority: without `contact_email` Unpaywall is skipped
+  entirely, without an OpenAlex key everything shares the common
+  pool, and *both facts are announced only on the terminal the user
+  cannot see* (`metrics._announce_unauthenticated`). A new user's
+  first impression is that metadata lookup is unreliable, with no
+  clue offered. This is the one item here with a direct effect on
+  whether Alexandria looks like it works.
+
+- **Strangers will be confused by different things.** Every
+  affordance fixed this weekend — the highlight row that only
+  navigated by its 16 px arrow, the "Discover (OpenAlex)" label, the
+  Follow button above its own subject list — was found by someone who
+  already knew what to expect. No action item; a reason to treat the
+  first outside bug reports as data about the interface rather than
+  as misunderstandings.
+
+- **DONE 2026-09-22** — where the Flatpak puts things is now in the
+  README (`35886b6`): the config, database and photo paths under
+  `~/.var/app/…`, that a Flatpak install shares nothing with a pip
+  one, and that the sandbox sees `~/Documents` and little else, with
+  the Flatseal and `flatpak override` lines for a library kept
+  elsewhere.
+
 ## pdb viewer zoom
 
  - Command + to zoom in (on Mac)
