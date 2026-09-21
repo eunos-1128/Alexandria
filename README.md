@@ -40,7 +40,8 @@ Alexandria is intended to be XDG Base Directory Protocol [3] compliant. It
 writes, by default, to `$HOME/Documents/Alexandria` and the database to
 `$HOME/.local/state/Alexandria` with a config file
 in `$HOME/.config/Alexandria/config.json` for sort order config and
-OpenAlex key.
+OpenAlex key. (A Flatpak install puts all three somewhere else — see
+[Configuration](#configuration).)
 
 ## Background
 
@@ -198,6 +199,30 @@ Both can also be set in **Preferences → Online services** rather than
 by editing the file, and the file is the same file. The library root
 can be overridden for one run with the `ALEXANDRIA_LIBRARY`
 environment variable.
+
+### If you installed the Flatpak
+
+The sandbox redirects the XDG directories, so nothing is where the
+paths above say. Substitute:
+
+| | |
+| --- | --- |
+| config | `~/.var/app/io.github.pemsley.Alexandria/config/Alexandria/config.json` |
+| databases | `~/.var/app/io.github.pemsley.Alexandria/.local/state/Alexandria/` |
+| author photos | `~/.var/app/io.github.pemsley.Alexandria/.local/share/Alexandria/` |
+
+Two consequences worth knowing before you go looking for a bug:
+
+* **A Flatpak install shares nothing with a `pip` install** — not the
+  index, not the author trail, not the photographs. The same machine
+  can hold two libraries that know nothing of each other.
+* **The sandbox can see `~/Documents` and little else.** If your PDFs
+  live anywhere else, Alexandria will start with an empty library and
+  no explanation. Grant the extra directory with
+  [Flatseal](https://flathub.org/apps/com.github.tchx84.Flatseal), or:
+
+      flatpak override --user \
+          --filesystem=~/Papers io.github.pemsley.Alexandria
 
 ## Usage
 
