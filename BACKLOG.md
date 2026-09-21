@@ -2395,6 +2395,76 @@ Pending features, roughly grouped. Newest at the top of each section.
     `index.db_path_of` was added so the worker can open its own
     connection from a window that is handed only a connection.)*
 
+- **Revise citing-impact — and decide whether it should be
+  normalised.** Written up in full at `docs/design/citing-impact.md`
+  (2026-09-21), which is the place to start: it sets out the
+  definition, a worked example from the real cache, and a comparison
+  table against h-index, i10, g, m, FWCI, Eigenfactor/SJR and
+  altmetrics.
+
+  **The open question is normalisation, and it is the one that
+  decides what the number is for.** As shipped, citing-impact is a
+  raw second-order sum: for each of an author's top-20 works, the
+  citation counts of every paper citing it, bucketed by software /
+  method / idea. Unnormalised, it says something true about *one*
+  author and nothing at all when set beside another — a long career
+  in a large field out-totals a short one in a small field, and the
+  number cannot tell you which happened.
+
+  Eigenfactor is the nearest published relative: it also weights a
+  citation by the standing of whoever made it. **Before copying any
+  of it, its normalisation has to be understood properly rather than
+  from memory.** What to establish, from the primary sources
+  (Bergstrom & West's papers; eigenfactor.org's methods page — which
+  did not respond when tried on 2026-09-22, so it may need the
+  Wayback Machine):
+
+    - What exactly is normalised, and against what: the score is
+      said to be scaled so all journals sum to a fixed total, which
+      makes it a *share of attention* rather than a rate. Is that
+      right, and is a share the thing we want per author?
+    - The damping factor and why it exists in a random walk, and
+      whether it means anything for a **one-hop** measure like ours.
+      Our walk does not iterate to a fixed point; it counts the
+      citers' citations once. Half of PageRank's machinery may
+      simply not apply.
+    - The citation window (five years?) and what it buys. Our metric
+      has no window at all, which is why a 1990s method paper's
+      citers have had thirty years to accumulate.
+    - How self-citation is handled at journal level, against our
+      server-side author self-cite exclusion.
+    - **Article Influence Score**, the per-article normalisation
+      derived from Eigenfactor, is probably the closer analogue for
+      an author-level number than Eigenfactor itself. Check.
+
+  **Candidate normalisations for us**, once that is understood:
+
+    - *Divide by the author's own citation count* — "the people who
+      cite me are themselves cited N× as much as I am". Dimensionless,
+      cheap, no extra API calls, and comparable between careers in a
+      way the raw sum is not. The obvious first thing to try.
+    - *Divide by works walked* — a mean rather than a total, which
+      removes the prolific-author advantage but also removes the
+      signal that a tool paper carries a whole career's visibility.
+    - *Field-normalise* via OpenAlex's own FWCI on the citing papers.
+      Principled, and expensive: another field per citer.
+    - *Nothing* — keep it raw and label it clearly as a
+      within-author statistic. Defensible, and the current position.
+
+  **Decide before implementing:** a normalised number *looks*
+  comparable, so publishing one that is only half-normalised is
+  worse than publishing a raw one that admits it is not. That is the
+  argument for doing the reading first.
+
+  Also open, from the same write-up:
+
+    - `classify_paper` is title-word matching; OpenAlex's `type` and
+      the presence of a software-registry identifier would do better
+      than "does the title contain 'package'".
+    - Recency weighting, per the thirty-year point above.
+    - The chip's magnitude ("idea 2.3M" beside "85,493 citations")
+      reads as a bug to anyone who has not hovered the tooltip.
+
 - **SHIPPED; the rest is refinement.** Citing-impact score per
   author. `metrics.compute_citing_impact`
   is shipped — sums `cited_by_count` across every paper that cites
