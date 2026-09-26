@@ -60,6 +60,32 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.7.1" date="2026-09-26">
+      <url type="details">https://github.com/pemsley/Alexandria/blob/main/RELEASE-NOTES</url>
+      <description>
+        <p>
+          A first run that asks where your library should live,
+          looking a paper up from a half-remembered citation, and
+          Retraction Watch in the feed.
+        </p>
+        <ul>
+          <li>A first run asks where your library should live instead
+            of deciding for you — one click accepts the suggested
+            folder, the other chooses any other</li>
+          <li>Discover "By citation": find a paper from its first
+            author, year and journal, or paste a citation and have
+            those three filled in for you</li>
+          <li>Follow Retraction Watch, with the article's picture on
+            the card where its feed carries one</li>
+          <li>Alexandria knows which folders its Flatpak may open, so
+            a PDF dragged in from out of reach says so rather than
+            reporting "no PDFs found"</li>
+          <li>A citing-impact score cut short by a rate limit is
+            marked "(partial)" and recomputed, rather than cached for
+            thirty days as though it were the answer</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.7.0" date="2026-09-20">
       <url type="details">https://github.com/pemsley/Alexandria/blob/main/RELEASE-NOTES</url>
       <description>

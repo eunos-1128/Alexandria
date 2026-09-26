@@ -1,3 +1,44 @@
+  Release Notes for 0.7.1
+
+ o FEATURE: A first run now asks where your library should live,
+            rather than deciding for you. One click accepts the
+            suggested folder; the other button chooses any other.
+            Existing installations are not asked.
+
+ o FEATURE: Discover: "By citation" — find a paper from its first
+            author, year and journal, which is usually all you can
+            remember. Paste a citation whole and it fills the three
+            fields, so you can see what it understood and correct it
+            before searching. It is the first tab, and what Discover
+            opens on.
+
+ o FEATURE: Follow Retraction Watch. Add... → Retractions, and the
+            reporting on retractions, paper mills and misconduct
+            arrives beside your journals and preprints. These are
+            articles about papers rather than papers, so a card
+            offers "Read" and nothing else.
+            Feed cards show the article's picture where its feed
+            carries one. They are fetched in the background, so the
+            window never waits for them, and the card keeps its shape
+            whether one arrives or not.
+
+ o CHANGE:  Alexandria knows when it is running inside a Flatpak, and
+            which folders that Flatpak is allowed to open. A PDF
+            dragged in from somewhere out of reach now says so and
+            names the folders it can read, instead of reporting "no
+            PDFs found."
+
+ o CHANGE:  A citing-impact score that had to be abandoned part way —
+            a rate limit, a timeout — is marked "(partial)" rather
+            than "(stale)". A floor is a more useful caveat than an
+            old number.
+            A citing-impact walk that was cut short was cached for
+            thirty days as though it were the answer, so a bucket
+            reading zero because nothing replied looked exactly like
+            one reading zero because nobody cited it.
+
+-----
+
   Release Notes for 0.7.0
 
  o FEATURE: Follow bioRxiv subject collections. bioRxiv has no
