@@ -5964,12 +5964,17 @@ class BrowserWindow(Adw.ApplicationWindow):
         page.set_icon_name("io.github.pemsley.Alexandria")
         page.set_title("Welcome to Alexandria")
 
+        # Adw.StatusPage's description label renders Pango, so the
+        # folder can be set in <tt> — in the middle of a sentence a
+        # path reads as prose, and in a monospace face it reads as a
+        # thing on disk.
         default_root = self.library_root
         body = ("Alexandria keeps your PDFs in a folder of your own, "
                 "with a small JSON file of metadata beside each one — "
                 "nothing is hidden in a database you cannot read.\n\n"
-                "Suggested folder:\n{}".format(default_root))
-        summary = sandbox.access_summary()
+                "Suggested folder:\n{}".format(
+                    sandbox.as_path_markup(default_root)))
+        summary = sandbox.access_summary(markup=True)
         if summary:
             body += "\n\n" + summary
         page.set_description(body)

@@ -152,6 +152,33 @@ def test_the_page_names_the_folder_it_proposes(tmp_path):
 
 
 @pytestmark_gtk
+def test_the_folder_is_set_as_a_path_not_as_prose(tmp_path):
+    """Adw.StatusPage's description renders Pango, so the suggested
+    folder is shown in <tt> — a path in the middle of a sentence is
+    otherwise hard to pick out of one."""
+    root = str(tmp_path / "Alexandria")
+    page = _Window(root)._build_welcome_page()
+
+    assert "<tt>{}</tt>".format(root) in page.get_description()
+
+
+@pytestmark_gtk
+def test_the_description_is_valid_markup_whatever_the_folder_is_called(
+        tmp_path):
+    """The folder name is the user's. One unescaped & would take the
+    whole label down."""
+    from alexandria.markup import _markup_parses
+
+    root = str(tmp_path / "Papers & <drafts>")
+    page = _Window(root)._build_welcome_page()
+
+    assert _markup_parses(page.get_description())
+    # Rendered, the user sees their folder name as they typed it.
+    assert "Papers & <drafts>" in page.get_description().replace(
+        "&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+
+
+@pytestmark_gtk
 def test_it_offers_the_default_and_an_alternative(tmp_path):
     page = _Window(str(tmp_path / "Alexandria"))._build_welcome_page()
     labels = [b.get_label() for b in _buttons(page)]

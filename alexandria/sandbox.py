@@ -230,14 +230,36 @@ def can_access(path, info_path=FLATPAK_INFO):
     return False
 
 
-def access_summary(info_path=FLATPAK_INFO):
+def _escape(text):
+    """Pango-escape, without making GLib a hard dependency of a
+    module that is otherwise pure stdlib."""
+    try:
+        from gi.repository import GLib
+        return GLib.markup_escape_text(text)
+    except Exception:
+        return (text.replace("&", "&amp;").replace("<", "&lt;")
+                    .replace(">", "&gt;"))
+
+
+def as_path_markup(path):
+    """A path dressed as a path: Pango `<tt>`, contents escaped.
+
+    A folder name in the middle of a sentence reads as prose and is
+    hard to pick out of one; in a monospace face it reads as a thing
+    on disk. Labels that take markup — `Adw.StatusPage` descriptions
+    among them — can use this; a toast cannot."""
+    return "<tt>{}</tt>".format(_escape(path))
+
+
+def access_summary(info_path=FLATPAK_INFO, markup=False):
     """One human sentence naming the folders the user can put a
     library in, or '' when there is no restriction to explain.
 
     For toasts and dialogs, where the honest message is "that file is
     outside what this Flatpak can open" rather than "no PDFs found".
     Paths are written with `~` because that is how the user thinks of
-    them, and how Flatseal shows them."""
+    them, and how Flatseal shows them; with `markup=True` they are
+    also set in `<tt>`, for the labels that render Pango."""
     if _info(info_path) is None:
         return ""
     paths = granted_paths(info_path)
@@ -249,7 +271,8 @@ def access_summary(info_path=FLATPAK_INFO):
     for p in paths:
         if p == "/":
             return ""          # full host access: nothing to warn about
-        pretty.append("~" + p[len(home):] if p.startswith(home) else p)
+        short = "~" + p[len(home):] if p.startswith(home) else p
+        pretty.append(as_path_markup(short) if markup else short)
     if len(pretty) == 1:
         return "This Flatpak can only open files in {}.".format(pretty[0])
     return "This Flatpak can only open files in {} and {}.".format(

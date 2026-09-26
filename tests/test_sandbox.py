@@ -222,6 +222,50 @@ def test_a_sandbox_granted_nothing_says_so(info):
     assert "not been granted access" in sandbox.access_summary(p)
 
 
+# ---- paths dressed as paths ------------------------------------------
+#
+# A folder name in the middle of a sentence reads as prose. In a
+# monospace face it reads as a thing on disk, which is what it is.
+
+def test_a_path_is_set_in_tt():
+    assert sandbox.as_path_markup("/home/paule/Documents/Alexandria") == (
+        "<tt>/home/paule/Documents/Alexandria</tt>")
+
+
+def test_a_path_with_markup_characters_is_escaped():
+    """Folder names are the user's, not ours. An unescaped & would
+    take the whole label down with it."""
+    out = sandbox.as_path_markup("~/Papers & <notes>")
+
+    assert out == "<tt>~/Papers &amp; &lt;notes&gt;</tt>"
+
+    from alexandria.markup import _markup_parses
+    assert _markup_parses(out)
+
+
+def test_the_summary_can_be_asked_for_markup(info):
+    p = info()
+
+    assert sandbox.access_summary(p, markup=True) == (
+        "This Flatpak can only open files in "
+        "<tt>~/Documents/Alexandria</tt>.")
+
+
+def test_every_path_in_a_list_is_marked_up(info):
+    p = info(ALEXANDRIA_INFO.replace(
+        "filesystems=xdg-documents/Alexandria:create;",
+        "filesystems=xdg-documents:create;/srv/papers;"))
+
+    assert sandbox.access_summary(p, markup=True) == (
+        "This Flatpak can only open files in <tt>~/Documents</tt> "
+        "and <tt>/srv/papers</tt>.")
+
+
+def test_plain_text_is_still_the_default(info):
+    """Toasts do not render Pango: a <tt> there would be shown."""
+    assert "<tt>" not in sandbox.access_summary(info())
+
+
 # ---- the message the drop handler gives ------------------------------
 #
 # The symptom that started all this: a PDF dragged from ~/Documents
