@@ -277,6 +277,50 @@ built successfully and it stopped being true that the only user is
 the author. Everything here works today *because* of that fact, and
 stops working the moment it is false.
 
+- **A library folder chosen through the portal must be stored as its
+  host path.** The first-run welcome page (done, 31c0fd1) lets the
+  user pick any folder. Under Flatpak, a folder the manifest never
+  named is granted by the FileChooser portal and appears to the
+  application as `/run/user/1000/doc/<id>/Papers`, and that is the
+  path `_apply_library_root` writes into `config.json` and every row
+  of the index.
+
+  Three things read the library by absolute path from *outside* the
+  sandbox and would all be reading a path that does not exist for
+  them: the MCP server, the Firefox-extension download watcher, and
+  the user at a terminal.
+
+  The way out is confirmed to exist. `org.freedesktop.portal.Documents`
+  carries, introspected 2026-09-25:
+
+      .GetHostPaths  method  as        a{say}
+      .Info          method  s         aya{sas}
+
+  So the application can do its I/O on the portal path and store the
+  host path — the database stays meaningful to everything outside the
+  sandbox and the sandbox keeps its access.
+
+  **Not attempted yet, deliberately: it cannot be tested from the
+  host.** A doc id only exists after a real portal grant, so the proof
+  has to run inside the sandbox. Until then, choosing a folder outside
+  the manifest grant is the one path on the welcome page that has not
+  been exercised.
+
+  Two more unknowns to settle in the same sitting:
+
+    - **Does `GFileMonitor` deliver events through the portal's FUSE
+      mount?** `watcher.py` watches the library root. If inotify does
+      not cross the FUSE boundary, drop-a-PDF-into-the-folder stops
+      working for a portal-chosen library, which is a daily-use
+      feature, not an edge case.
+    - **Does the grant survive a restart** without re-prompting, for a
+      *directory* rather than a file?
+
+  Related and independent: widening the manifest to
+  `--filesystem=xdg-documents:create` makes any folder under
+  `~/Documents` work without the portal at all, and Flathub accepts it
+  readily. That is a change to the Flathub PR, not to this repository.
+
 - **Diagnostics the user can find.** Nearly every fix this month
   began with a terminal: the sidebar off-by-one, the import that
   hung, the summary showing raw Markdown. There are **58 `print("[…]`
