@@ -5969,9 +5969,9 @@ class BrowserWindow(Adw.ApplicationWindow):
         # path reads as prose, and in a monospace face it reads as a
         # thing on disk.
         default_root = self.library_root
-        body = ("Alexandria keeps your PDFs in a folder of your own, "
-                "with a small JSON file of metadata beside each one — "
-                "nothing is hidden in a database you cannot read.\n\n"
+        body = ("Alexandria keeps your PDFs in your own folder, "
+                "with a JSON file of metadata next to each one."
+                "\n\n"
                 "Suggested folder:\n{}".format(
                     sandbox.as_path_markup(default_root)))
         summary = sandbox.access_summary(markup=True)
