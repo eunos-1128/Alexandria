@@ -1690,10 +1690,16 @@ stops working the moment it is false.
   Crossref's top hit had a different first author and the guard
   rightly rejected it, while the author/year/journal path got it.
 
-  **What is missing:** a string parser (surname / year / journal /
-  title-words) and a UI entry point — a fifth Discover tab is the
-  obvious home, since `_build_work_row`, the Add-to-library path and
-  the author field are all reusable.
+  **DONE 2026-09-26** — the Discover tab exists: "By citation", with
+  a paste box that parses into First author / Year / Journal, the
+  ranked list below it, and the usual Add-to-library button. The
+  status line names the rung of the year ladder that answered, since
+  a hit found only after the year was relaxed is a weaker answer than
+  one found on the year as cited. Original note: what was missing was
+  a string parser (surname / year / journal / title-words) and a UI
+  entry point — a Discover tab being the obvious home, since
+  `_build_work_row`, the Add-to-library path and the author field are
+  all reusable.
 
   **Show a ranked list, not one answer.** Google Scholar does not
   disambiguate these either; it ranks well enough that the top row is
