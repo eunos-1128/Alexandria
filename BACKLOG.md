@@ -7,17 +7,20 @@ Pending features, roughly grouped. Newest at the top of each section.
 - **Background passes keep working on papers whose files are gone.**
   Seen 2026-09-25 in the Flatpak, whose index holds 9 rows for PDFs
   that no longer exist (the library folder they pointed at is now
-  empty). On every start, `_crossref_extras_backfill` walks those
-  rows, **makes a CrossRef call for each one**, then fails:
+  empty). Four of those rows have a DOI and no cached license, so
+  `_crossref_extras_backfill` walks them, **makes a CrossRef call for
+  each**, and then fails on three of them:
 
       [crossref] sidecar write failed for …/zbc14565.pdf:
           [Errno 2] No such file or directory: '…/zbc14565.pdf.alexandria'
 
-  one every three seconds, for ever, on every launch. Undesirable
-  rather than broken: nothing is corrupted, but the application
-  spends network calls and log lines on papers it cannot act on, and
-  a user watching the log sees a stream of errors about files they
-  deliberately moved.
+  Three seconds apart, then the pass ends — it does not spin. But
+  because nothing was written, the same four rows are still missing
+  their license next time, so the same four calls are made again at
+  every launch, for as long as the rows are there. Undesirable rather
+  than broken: nothing is corrupted, but the application spends
+  network calls and log lines on papers it cannot act on, and a user
+  watching the log sees errors about files they deliberately moved.
 
   **Three separate faults, worth separating:**
 
