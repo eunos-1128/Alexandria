@@ -269,6 +269,61 @@ Pending features, roughly grouped. Newest at the top of each section.
     happened: a 185-PDF import through the GUI, 172 papers, zero
     errors, and no such message in the terminal.)*
 
+## Retractions
+
+- **Check the library against the Retraction Watch database.** A
+  paper in the library that has since been retracted currently looks
+  exactly like one that has not. The data to fix that is free:
+  Retraction Watch was acquired by Crossref in 2023 and the whole
+  database is published as a CSV.
+
+  Probed 2026-09-26:
+
+      https://api.labs.crossref.org/data/retractionwatch?<email>
+      → HTTP 200, 53,227,520 bytes
+
+  Columns: `Record ID, Title, Subject, Institution, Journal,
+  Publisher, Country, Author, URLS, ArticleType, RetractionDate,
+  RetractionDOI, RetractionPubMedID, OriginalPaperDate,
+  **OriginalPaperDOI**, OriginalPaperPubMedID, RetractionNature,
+  Reason, Paywalled, Notes`.
+
+  `OriginalPaperDOI` is the join key against `papers.doi`, and
+  `RetractionDOI` gives the notice to read. So the feature is
+  "**2 papers in this library have been retracted**", with the
+  reason and the date, and a way to open the notice.
+
+  **Alexandria is already shaped for this.** `papers` carries
+  `crossmark_label / crossmark_type / crossmark_severity /
+  crossmark_doi / crossmark_year` from the CrossRef backfill, and the
+  card already has somewhere to put a chip. This would populate the
+  same idea from a source that covers retractions Crossmark misses.
+
+  Shape of the work:
+
+    - Download once, not per paper. 53 MB is too much to pull often:
+      fetch monthly, keep a compact local table of
+      `original_doi → (retraction_date, reason, retraction_doi,
+      nature)` — tens of thousands of rows is nothing for SQLite —
+      and drop the CSV.
+    - Match on the DOI, lowercased, the way the rest of the index
+      does.
+    - Say it loudly once and quietly thereafter: a toast on the
+      refresh that finds one, a permanent chip on the card.
+    - `RetractionNature` distinguishes *Retraction* from *Correction*
+      and *Expression of Concern*; those are three different things
+      to a reader and should not share a colour.
+
+  **It needs an email in the query string**, like Unpaywall — so it
+  quietly does nothing until `contact_email` is set, which for a new
+  user is never. See the first-run entries.
+
+  Companion to the Retraction Watch *feed* subscription (the
+  journalism), which is a different thing: the blog carries almost no
+  DOIs — nine DOI-shaped strings in the whole 114 KB feed — so it can
+  never tell you about your own library. This entry is the half that
+  can.
+
 ## First outside users
 
 Filed 2026-09-22, when the Flathub submission
