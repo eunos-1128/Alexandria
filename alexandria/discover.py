@@ -1,6 +1,10 @@
 """Discover — search OpenAlex from a blank canvas.
 
-Two modes:
+Tabs, in the order they are offered:
+
+* **By citation**: first author + year + journal, or a citation
+  pasted whole and parsed into those three. What a person usually
+  has in hand when they go looking for a paper, so it leads.
 
 * **By author**: name + optional institution + optional ORCID. Returns
   candidate authors with affiliation and top-topic chips. Click an
@@ -10,6 +14,8 @@ Two modes:
 * **By topic**: free-text query, optional year-min filter, sort by
   relevance / citations / recency. Returns paper rows; per-row "Add
   to library" + DOI buttons.
+
+* **By title**, **By PDB** accession code, and **Preprints**.
 
 This is the v0 entry point for an empty library — the user can find
 something to import without first having any papers in the index.
@@ -56,6 +62,12 @@ class DiscoverWindow(Adw.Window):
         # add_titled_with_icon: Adw.ViewSwitcher always renders a
         # per-page icon, so without one each tab shows the broken-image
         # placeholder. Icons are standard Adwaita symbolics.
+        # "By citation" leads, and so is what Discover opens on: a
+        # part-remembered citation is the most common thing a person
+        # has in hand when they go looking for a paper.
+        self.stack.add_titled_with_icon(
+            self._build_citation_page(), "citation", "By citation",
+            "view-list-symbolic")
         self.stack.add_titled_with_icon(
             self._build_author_page(), "author", "By author",
             "avatar-default-symbolic")
@@ -65,9 +77,6 @@ class DiscoverWindow(Adw.Window):
         self.stack.add_titled_with_icon(
             self._build_title_page(), "title", "By title",
             "text-x-generic-symbolic")
-        self.stack.add_titled_with_icon(
-            self._build_citation_page(), "citation", "By citation",
-            "view-list-symbolic")
         self.stack.add_titled_with_icon(
             self._build_pdb_page(), "pdb", "By PDB",
             "applications-science-symbolic")
