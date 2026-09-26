@@ -66,6 +66,9 @@ class DiscoverWindow(Adw.Window):
             self._build_title_page(), "title", "By title",
             "text-x-generic-symbolic")
         self.stack.add_titled_with_icon(
+            self._build_citation_page(), "citation", "By citation",
+            "view-list-symbolic")
+        self.stack.add_titled_with_icon(
             self._build_pdb_page(), "pdb", "By PDB",
             "applications-science-symbolic")
         self.stack.add_titled_with_icon(
@@ -528,6 +531,178 @@ class DiscoverWindow(Adw.Window):
         return False
 
     # =========================================================
+    # By citation — first author / year / journal, no title
+    # =========================================================
+
+    def _build_citation_page(self):
+        """Look a paper up from what a citation actually gives you.
+
+        The machinery has been here since September —
+        `metrics.find_citation_candidates`, which does the journal-
+        abbreviation expansion and the exact-year-then-±1-then-any
+        ladder — but the only door to it was the Edit-metadata dialog
+        of a paper already in the library. That is the wrong way
+        round: the case for this is a reference you do *not* have.
+
+        Two ways in, because a citation arrives in two forms. Pasted
+        whole, from an email or a talk, it goes in the top box and is
+        parsed. Read off a page, it goes straight into the three
+        fields. The parse fills those same fields rather than
+        searching behind them, so its interpretation is visible and
+        correctable — a misread surname is otherwise indistinguishable
+        from a paper that isn't there."""
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        box.set_margin_start(12)
+        box.set_margin_end(12)
+        box.set_margin_top(10)
+        box.set_margin_bottom(10)
+
+        controls = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+
+        self._ci_paste = Gtk.Entry()
+        self._ci_paste.set_placeholder_text(
+            "optional — paste a citation, e.g. Jones et al., "
+            "J. Mol. Biol., 1995")
+        controls.append(_form_row("Citation", self._ci_paste))
+
+        fields = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self._ci_surname = Gtk.Entry()
+        self._ci_surname.set_placeholder_text("Jones")
+        self._ci_surname.set_hexpand(True)
+        fields.append(_form_row("First author", self._ci_surname))
+        self._ci_year = Gtk.Entry()
+        self._ci_year.set_max_length(4)
+        self._ci_year.set_width_chars(5)
+        self._ci_year.set_placeholder_text("(any)")
+        year_lbl = Gtk.Label(label="Year")
+        year_lbl.set_xalign(1.0)
+        fields.append(year_lbl)
+        fields.append(self._ci_year)
+        controls.append(fields)
+
+        self._ci_journal = Gtk.Entry()
+        self._ci_journal.set_placeholder_text(
+            "optional — JMB, J. Mol. Biol. and the full name all work")
+        controls.append(_form_row("Journal", self._ci_journal))
+
+        btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        self._ci_search_btn = Gtk.Button(label="Search OpenAlex")
+        self._ci_search_btn.add_css_class("suggested-action")
+        self._ci_search_btn.connect("clicked", self._on_citation_search)
+        btn_row.append(self._ci_search_btn)
+        controls.append(btn_row)
+
+        # Enter in the paste box parses *and* searches: the fields it
+        # fills are right in view, so a bad parse is seen at once.
+        self._ci_paste.connect("activate", self._on_citation_paste)
+        self._ci_paste.connect("changed", self._on_citation_paste_changed)
+        for entry in (self._ci_surname, self._ci_year, self._ci_journal):
+            entry.connect("activate", self._on_citation_search)
+
+        box.append(controls)
+
+        self._ci_status = Gtk.Label(xalign=0.0)
+        self._ci_status.set_wrap(True)
+        box.append(self._ci_status)
+
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_vexpand(True)
+        scrolled.set_hexpand(True)
+        self._ci_results_box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        scrolled.set_child(self._ci_results_box)
+        box.append(scrolled)
+        return box
+
+    def _on_citation_paste_changed(self, entry):
+        """Parse as it is typed, so the three fields track the box.
+
+        Only ever *fills* — a field the user has edited by hand is
+        left alone, because correcting the parse is the point of
+        showing it."""
+        text = (entry.get_text() or "").strip()
+        if not text:
+            return
+        hint = metrics.parse_citation_hint(text)
+        for widget, value in ((self._ci_surname, hint.get("surname")),
+                              (self._ci_year, hint.get("year")),
+                              (self._ci_journal, hint.get("journal"))):
+            if value and not _is_hand_edited(widget):
+                _fill(widget, str(value))
+
+    def _on_citation_paste(self, _entry):
+        self._on_citation_paste_changed(self._ci_paste)
+        self._on_citation_search(None)
+
+    def _on_citation_search(self, _btn):
+        surname = (self._ci_surname.get_text() or "").strip()
+        if not surname:
+            self._ci_status.set_text(
+                "A first-author surname is the one thing this needs.")
+            return
+        journal = (self._ci_journal.get_text() or "").strip() or None
+        year_text = (self._ci_year.get_text() or "").strip()
+        year = None
+        if year_text:
+            try:
+                year = int(year_text)
+            except ValueError:
+                self._ci_status.set_text("Year must be a number.")
+                return
+
+        self._ci_status.set_text("Searching OpenAlex: {} / {} / {}…".format(
+            surname, journal or "any journal", year or "any year"))
+        self._ci_search_btn.set_sensitive(False)
+        self._clear_box(self._ci_results_box)
+
+        def _do():
+            try:
+                mode, cands = metrics.find_citation_candidates(
+                    surname, year, journal)
+            except Exception as e:
+                GLib.idle_add(self._after_citation_search,
+                              None, [], str(e))
+                return
+            GLib.idle_add(self._after_citation_search, mode, cands, None)
+
+        threading.Thread(target=_do, daemon=True).start()
+
+    # What the year ladder settled on, in words. A result found only
+    # after the year was relaxed is a weaker answer than one found on
+    # the year as cited, and the user is the one who knows whether
+    # that matters.
+    _YEAR_MODE_NOTE = {
+        "exact": "",
+        "minus1": " — nothing in that exact year, so the year before "
+                  "is included (online-first publication runs that way)",
+        "none": " — nothing in that year, so the year was dropped",
+    }
+
+    def _after_citation_search(self, mode, cands, err):
+        self._ci_search_btn.set_sensitive(True)
+        if err:
+            self._ci_status.set_markup(
+                "<span foreground='#cc3333'>Search failed: {}</span>".format(
+                    GLib.markup_escape_text(err)))
+            return False
+        if not cands:
+            self._ci_status.set_text(
+                "Nothing found. OpenAlex matches the author name as "
+                "printed on the paper, so a spelling variant can hide "
+                "it — try without the journal, or without the year.")
+            return False
+        note = self._YEAR_MODE_NOTE.get(mode or "none", "")
+        self._ci_status.set_markup(
+            "<small>{} candidate{}, best first{}</small>".format(
+                len(cands), "" if len(cands) == 1 else "s",
+                GLib.markup_escape_text(note)))
+        existing = self.parent_window._existing_dois_set()
+        for c in cands:
+            self._ci_results_box.append(
+                self._build_work_row(_as_work_row(c), existing))
+        return False
+
+    # =========================================================
     # By PDB accession code
     # =========================================================
 
@@ -798,6 +973,40 @@ class DiscoverWindow(Adw.Window):
             nxt = child.get_next_sibling()
             box.remove(child)
             child = nxt
+
+
+def _fill(entry, text):
+    """Set an entry's text as the parser, remembering what was put
+    there — see `_is_hand_edited`."""
+    entry.set_text(text)
+    entry._parser_wrote = text
+
+
+def _is_hand_edited(entry):
+    """Has the user changed this field since the parser last filled
+    it? Then the parser must leave it alone: correcting a misread is
+    the reason the fields are shown at all.
+
+    Compares the text rather than watching the `changed` signal,
+    because `Gtk.Entry.set_text` deletes and then inserts — two
+    emissions, the first with an empty box — so a signal-based flag
+    cannot tell the parser's own write from a user clearing the
+    field. An empty field is never "hand-edited": there is nothing
+    there to protect."""
+    current = entry.get_text()
+    if not current:
+        return False
+    return current != getattr(entry, "_parser_wrote", None)
+
+
+def _as_work_row(cand):
+    """A `find_citation_candidates` candidate in the shape
+    `_build_related_row` reads. The two differ in one key —
+    `cited_by_count` against `citations` — which is enough to make
+    every candidate look uncited."""
+    row = dict(cand)
+    row["citations"] = cand.get("cited_by_count") or 0
+    return row
 
 
 def _form_row(label, entry):
