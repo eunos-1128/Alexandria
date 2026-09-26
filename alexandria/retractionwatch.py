@@ -53,6 +53,17 @@ _CONTINUE_RE = re.compile(
 _TAG_RE = re.compile(r"<[^>]+>")
 _WS_RE = re.compile(r"\s+")
 
+# The post's lead image. Every item in the feed of 2026-09-26 had
+# one, as the first <img> inside `content:encoded` — there is no
+# <media:content>, <media:thumbnail> or <enclosure> to ask instead.
+_IMG_RE = re.compile(r"<img\b[^>]*?\bsrc=[\"']([^\"']+)[\"']", re.I)
+# WordPress serves a ladder of resized copies of every upload:
+# `name-1024x683.jpg` beside `name-300x200.jpg` and the original.
+# A card wants a thumbnail, and 1024 px of JPEG per row is a waste
+# of somebody's bandwidth on both ends.
+_WP_SIZE_RE = re.compile(r"-(\d{3,4})x(\d{3,4})(\.[A-Za-z0-9]+)$")
+_THUMB_WIDTH = 300
+
 
 def _text(node, path, ns=None):
     found = node.find(path, ns or {})
@@ -73,6 +84,43 @@ def _clean_summary(raw):
     # A stray ellipsis left where the anchor was reads as a typo.
     out = re.sub(r"\s*[…]\s*$", "…", out)
     return out or None
+
+
+def _smaller_wordpress_copy(url):
+    """The 300 px-wide sibling of a WordPress upload, where the URL
+    says which size it is.
+
+    `…/iStock-2207141986-2-1024x683.jpg` → `…-300x200.jpg`, keeping
+    the aspect ratio WordPress itself used. Returned only when the
+    arithmetic is safe; anything unrecognised is handed back
+    untouched, and a wrong guess costs a 404 rather than a wrong
+    picture."""
+    m = _WP_SIZE_RE.search(url or "")
+    if not m:
+        return url
+    w, h, ext = int(m.group(1)), int(m.group(2)), m.group(3)
+    if w <= _THUMB_WIDTH or not w:
+        return url
+    new_h = max(1, round(h * _THUMB_WIDTH / w))
+    return url[:m.start()] + "-{}x{}{}".format(_THUMB_WIDTH, new_h, ext)
+
+
+def _lead_image(item):
+    """URL of the post's lead image, or None.
+
+    Looks in `content:encoded` first — that is the post body, where
+    the hero image lives — then the teaser, which sometimes repeats
+    it."""
+    for path, ns in (("content:encoded", _NS), ("description", None)):
+        node = item.find(path, ns or {})
+        if node is None or not node.text:
+            continue
+        m = _IMG_RE.search(node.text)
+        if m:
+            src = html.unescape(m.group(1)).strip()
+            if src.startswith(("http://", "https://")):
+                return src
+    return None
 
 
 def _iso_date(pub_date):
@@ -126,6 +174,7 @@ def parse_feed(xml_text):
             # otherwise empty for a blog post.
             "journal": ", ".join(categories[:3]) or None,
             "doi": None,
+            "image_url": _smaller_wordpress_copy(_lead_image(item)),
         })
     return out
 

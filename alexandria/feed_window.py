@@ -27,7 +27,8 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gtk, Pango
 
-from . import biorxiv, feed, index, opener, retractionwatch
+from . import (biorxiv, feed, feed_images, index, opener,
+               retractionwatch)
 from .markup import safe_pango_markup
 
 # Two characters, in the subscription strip: journal, topic, preprint
@@ -37,6 +38,12 @@ from .markup import safe_pango_markup
 # subscription gets the larger single-feed page.
 _PER_GROUP_CAP = 8
 _ALL_VIEW_CAP = 100
+
+# Card thumbnail. 4:3-ish, because press photographs mostly are,
+# and small enough that ten of them do not push the text off a
+# narrow window.
+_THUMB_W = 132
+_THUMB_H = 99
 
 _KIND_GLYPH = {
     "journal_issn": "[J]",
@@ -168,6 +175,14 @@ class FeedWindow(Adw.Window):
 
         self._refresh_subscriptions_strip()
         self._refresh_feed()
+
+        # Thumbnails outlive the rows that point at them unless
+        # something sweeps up. Opening this window is the natural
+        # moment: it is the only thing that puts images there.
+        try:
+            feed_images.prune()
+        except Exception:
+            pass
 
     # ──── Subscriptions strip ────────────────────────────────────
 
@@ -979,8 +994,50 @@ class FeedWindow(Adw.Window):
         outer.append(btn_row)
 
         frame = Gtk.Frame()
-        frame.set_child(outer)
+        frame.set_child(self._with_thumbnail(outer, art))
         return frame
+
+    def _with_thumbnail(self, content, art):
+        """Put the row's lead image beside its text, if it has one.
+
+        The space is reserved before the picture exists, so the card
+        is its final size from the first frame and the list does not
+        jump about as images land — which, with ten of them arriving
+        in an order the network chooses, it otherwise would."""
+        url = art.get("image_url")
+        if not url:
+            return content
+        pic = Gtk.Picture()
+        pic.set_size_request(_THUMB_W, _THUMB_H)
+        pic.set_valign(Gtk.Align.START)
+        pic.set_can_shrink(True)
+        # COVER crops to fill rather than letterboxing: these are
+        # press photographs of every shape, and a row of differently
+        # sized grey boxes reads worse than a consistent crop.
+        pic.set_content_fit(Gtk.ContentFit.COVER)
+        pic.add_css_class("card")
+
+        def _arrived(path):
+            # The window may have closed, or the feed been rebuilt,
+            # between the request and the file landing.
+            try:
+                pic.set_filename(path)
+            except Exception:
+                pass
+
+        feed_images.fetcher().request(url, _arrived)
+
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        row.set_margin_start(8)
+        row.set_margin_top(6)
+        row.set_margin_bottom(6)
+        content.set_hexpand(True)
+        # The text keeps its own margins; drop the left one, which
+        # the picture now provides.
+        content.set_margin_start(0)
+        row.append(pic)
+        row.append(content)
+        return row
 
     def _existing_in_library(self, doi):
         """Return the index row dict for a paper already in the

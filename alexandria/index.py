@@ -1521,6 +1521,12 @@ def _migrate_discovered(conn):
         # because SQLite treats every NULL as distinct and the same
         # post would arrive again on every refresh.
         conn.execute("ALTER TABLE discovered ADD COLUMN source_url TEXT")
+    if "image_url" not in cols:
+        # The row's lead image, for feeds that carry one. Stored as a
+        # URL, not as bytes: the file lives in the feed-images cache
+        # (see feed_images), which is disposable and pruned on the
+        # same horizon as these rows.
+        conn.execute("ALTER TABLE discovered ADD COLUMN image_url TEXT")
     # A UNIQUE *index* rather than a constraint: SQLite cannot add a
     # constraint to an existing table, and this can be created after
     # the fact. NULLs stay distinct under it, so the DOI-keyed rows
@@ -1646,8 +1652,8 @@ def upsert_discovered(conn, subscription_id, article):
         " (subscription_id, doi, openalex_id, title, authors_json,"
         "  authorships_json,"
         "  journal, year, published_date, abstract, is_oa, oa_url,"
-        "  fetched_at, source_url)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "  fetched_at, source_url, image_url)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (subscription_id,
          doi.lower() if doi else None,
          article.get("openalex_id"),
@@ -1668,7 +1674,8 @@ def upsert_discovered(conn, subscription_id, article):
          # `is_oa` stays 0 for the latter, so no OA badge appears.
          article.get("oa_url") or article.get("url"),
          datetime.datetime.now().isoformat(timespec="seconds"),
-         source_url))
+         source_url,
+         article.get("image_url")))
     return cur.rowcount > 0
 
 
