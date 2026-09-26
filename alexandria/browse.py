@@ -51,7 +51,7 @@ from . import (index, edit_dialog, importer, metrics, sidecar, extract,
                csl_export, opener, references_pdf, discover, csl_format,
                feed, feed_window, import_toast, pdb_mentions,
                funding_links, doi_import_dialog, jats, theme,
-               reload_policy)
+               reload_policy, sandbox)
 
 LIBRARY_ROOT = prefs.get_library_root()
 
@@ -2074,7 +2074,19 @@ class BrowserWindow(Adw.ApplicationWindow):
         toolbar_view.add_top_bar(self.search_bar)
         toolbar_view.add_top_bar(self.progress_box)
         toolbar_view.add_bottom_bar(status_bar)
-        toolbar_view.set_content(self._terminal_paned)
+
+        # The library, and the welcome page that stands in front of it
+        # on a first run. A stack rather than a dialog: a modal asking
+        # where to keep files, before the user has seen the
+        # application, is a question they cannot yet evaluate — and one
+        # dismissed by accident is a decision lost, where a page is
+        # still there.
+        self._content_stack = Gtk.Stack()
+        self._content_stack.add_named(self._terminal_paned, "library")
+        self._content_stack.add_named(self._build_welcome_page(), "welcome")
+        toolbar_view.set_content(self._content_stack)
+        if not prefs.library_root_chosen():
+            self._content_stack.set_visible_child_name("welcome")
 
         self.set_content(toolbar_view)
 
@@ -3946,12 +3958,26 @@ class BrowserWindow(Adw.ApplicationWindow):
         except Exception:
             return False
         paths = []
+        unreachable = []
         for f in files:
             p = f.get_path() if f else None
-            if p and p.lower().endswith(".pdf") and os.path.isfile(p):
+            if not p or not p.lower().endswith(".pdf"):
+                continue
+            if os.path.isfile(p):
                 paths.append(p)
+            elif not sandbox.can_access(p):
+                # Under a sandbox a file we may not open is
+                # indistinguishable from one that is not there, and
+                # "no PDFs found" blames the file. Say which it is.
+                unreachable.append(p)
         if not paths:
-            self._toast("Drop: no PDFs found")
+            if unreachable:
+                self._toast("Can't open {} — {}".format(
+                    os.path.basename(unreachable[0]),
+                    sandbox.access_summary()
+                    or "it is outside this Flatpak's permitted folders."))
+            else:
+                self._toast("Drop: no PDFs found")
             return False
         self.status.set_text("Importing {} dropped file(s)...".format(len(paths)))
         threading.Thread(target=self._do_drop_import,
@@ -5918,6 +5944,147 @@ class BrowserWindow(Adw.ApplicationWindow):
     def _open_authors(self, _btn):
         author_works.open_trail_window(self, self.conn)
 
+    # ---- First run -------------------------------------------------
+
+    def _build_welcome_page(self):
+        """The first thing a new user sees: where should the library
+        live?
+
+        One folder, not "catalogues" — someone on their first run does
+        not know what a catalogue is, and Preferences is where the
+        second one comes from. One click for the person who doesn't
+        care (the default is the suggested action), a real choice for
+        the person who does.
+
+        Under Flatpak the choice is more than a preference: it is what
+        the sandbox will let the application open. So the sandbox's
+        own account of what it can reach goes on the page, rather than
+        being discovered later as a file that "isn't there"."""
+        page = Adw.StatusPage()
+        page.set_icon_name("io.github.pemsley.Alexandria")
+        page.set_title("Welcome to Alexandria")
+
+        default_root = self.library_root
+        body = ("Alexandria keeps your PDFs in a folder of your own, "
+                "with a small JSON file of metadata beside each one — "
+                "nothing is hidden in a database you cannot read.\n\n"
+                "Suggested folder:\n{}".format(default_root))
+        summary = sandbox.access_summary()
+        if summary:
+            body += "\n\n" + summary
+        page.set_description(body)
+
+        buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        buttons.set_halign(Gtk.Align.CENTER)
+
+        use_btn = Gtk.Button(label="Use This Folder")
+        use_btn.add_css_class("suggested-action")
+        use_btn.add_css_class("pill")
+        use_btn.connect("clicked", self._on_welcome_use_default)
+        buttons.append(use_btn)
+
+        other_btn = Gtk.Button(label="Choose Another Folder…")
+        other_btn.add_css_class("pill")
+        other_btn.connect("clicked", self._on_welcome_choose_other)
+        buttons.append(other_btn)
+
+        page.set_child(buttons)
+        return page
+
+    def _on_welcome_use_default(self, _btn):
+        # The default root is already this catalogue's, so there is
+        # nothing to move — just make it and get out of the way.
+        try:
+            os.makedirs(self.library_root, exist_ok=True)
+        except OSError as exc:
+            self.status.set_text("Could not create {}: {}".format(
+                self.library_root, exc))
+            return
+        self._finish_welcome()
+
+    def _on_welcome_choose_other(self, _btn):
+        fd = Gtk.FileDialog()
+        fd.set_title("Choose PDF Folder")
+        # Under Flatpak this runs the FileChooser portal, which grants
+        # access to whatever is picked — including folders the
+        # manifest never named.
+        fd.set_initial_folder(Gio.File.new_for_path(
+            os.path.dirname(self.library_root) or self.library_root))
+
+        def _chosen(dialog, result):
+            try:
+                folder = dialog.select_folder_finish(result)
+            except GLib.Error:
+                return              # cancelled: the page stays
+            if folder is None:
+                return
+            if self._apply_library_root(folder.get_path()):
+                self._finish_welcome()
+
+        fd.select_folder(self, None, _chosen)
+
+    def _finish_welcome(self):
+        """Answered. Record it and show the library."""
+        try:
+            prefs.mark_library_root_chosen()
+        except Exception as exc:
+            # Not fatal: the worst case is being asked again next
+            # launch, which is better than refusing to start.
+            print("[prefs] could not record the library choice:", exc,
+                  file=sys.stderr)
+        self._content_stack.set_visible_child_name("library")
+        self._reload(None)
+
+    def _apply_library_root(self, new_path):
+        """Point this catalogue at `new_path`: save it, create it,
+        move the watcher over, reload. Returns True on success.
+
+        Shared by Preferences → PDF Folder and by the first-run
+        welcome page, which are the same operation asked at two
+        different moments."""
+        if not new_path:
+            return False
+        # Update the current catalogue's library_root in the saved
+        # list, and the legacy top-level key (so pre-catalogue config
+        # consumers still find it).
+        self.library_root = new_path
+        self.catalogue["library_root"] = new_path
+        data = prefs.load()
+        data["library_root"] = new_path
+        cats = list(prefs.get_catalogues())
+        for c in cats:
+            if c["name"] == self.catalogue["name"]:
+                c["library_root"] = new_path
+        data["catalogues"] = cats
+        try:
+            prefs.save(data)
+        except Exception as exc:
+            self.status.set_text("Saving preferences failed: " + str(exc))
+            return False
+        try:
+            os.makedirs(new_path, exist_ok=True)
+        except OSError as exc:
+            # Under a sandbox this is where an ungranted folder shows
+            # up, and "permission denied" alone does not explain why.
+            self.status.set_text("Could not use that folder: {}{}".format(
+                exc, "" if sandbox.can_access(new_path)
+                else " — " + sandbox.access_summary()))
+            return False
+        try:
+            self.library_watcher.stop()
+        except Exception:
+            pass
+        self.library_watcher = watcher_mod.LibraryWatcher(
+            self._db_path, self.library_root,
+            on_change_cb=self._on_watcher_change,
+            on_import_start_cb=self._on_import_start,
+            on_import_progress_cb=self._on_import_progress,
+            on_sidecar_rejected_cb=self._on_sidecar_rejected,
+            skip_roots=self._other_catalogue_roots())
+        self.library_watcher.start()
+        self._reload(self.search.get_text() or None)
+        return True
+
     def _open_preferences(self, _btn):
         dlg = Adw.PreferencesDialog()
         dlg.set_title("Preferences")
@@ -5952,38 +6119,8 @@ class BrowserWindow(Adw.ApplicationWindow):
             new_path = folder.get_path()
             if not new_path:
                 return
-            # Update the current catalogue's library_root in
-            # the saved list, and the legacy top-level key (so
-            # pre-catalogue config consumers still find it).
-            self.library_root = new_path
-            self.catalogue["library_root"] = new_path
-            data = prefs.load()
-            data["library_root"] = new_path
-            cats = list(prefs.get_catalogues())
-            for c in cats:
-                if c["name"] == self.catalogue["name"]:
-                    c["library_root"] = new_path
-            data["catalogues"] = cats
-            try:
-                prefs.save(data)
-            except Exception as exc:
-                self.status.set_text("Saving preferences failed: " + str(exc))
-                return
-            lib_row.set_subtitle(new_path)
-            os.makedirs(new_path, exist_ok=True)
-            try:
-                self.library_watcher.stop()
-            except Exception:
-                pass
-            self.library_watcher = watcher_mod.LibraryWatcher(
-                self._db_path, self.library_root,
-                on_change_cb=self._on_watcher_change,
-                on_import_start_cb=self._on_import_start,
-                on_import_progress_cb=self._on_import_progress,
-                on_sidecar_rejected_cb=self._on_sidecar_rejected,
-                skip_roots=self._other_catalogue_roots())
-            self.library_watcher.start()
-            self._reload(self.search.get_text() or None)
+            if self._apply_library_root(new_path):
+                lib_row.set_subtitle(new_path)
 
         def _on_choose_lib(_b):
             fd = Gtk.FileDialog()

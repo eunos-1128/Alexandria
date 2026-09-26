@@ -65,12 +65,37 @@ def ensure_config_file(path=DEFAULT_PATH):
         "current_catalogue": "default",
         "contact_email": "",
         "openalex_api_key": "",
+        # False only ever here, in a config written by a first run:
+        # the welcome page reads it to know it has a question to ask.
+        # The default root above is written all the same, so every
+        # existing code path has somewhere to point while the user
+        # decides — and so does the user who never answers.
+        "library_root_chosen": False,
     }
     try:
         save(starter, path)
     except OSError:
         return False
     return True
+
+
+def library_root_chosen(path=DEFAULT_PATH):
+    """Has the user been asked where their library should live?
+
+    Absent means yes — every config written before the welcome page
+    existed belongs to someone already using the application, and
+    greeting them with a first-run question would be absurd. Only
+    `ensure_config_file` writes it False, and only the welcome page
+    writes it True."""
+    return bool(load(path).get("library_root_chosen", True))
+
+
+def mark_library_root_chosen(path=DEFAULT_PATH):
+    """Record that the question has been answered — including when
+    the answer was "the default is fine"."""
+    data = load(path)
+    data["library_root_chosen"] = True
+    save(data, path)
 
 
 def load(path=DEFAULT_PATH):
