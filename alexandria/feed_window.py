@@ -27,7 +27,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gtk, Pango
 
-from . import biorxiv, feed, index, opener
+from . import biorxiv, feed, index, opener, retractionwatch
 from .markup import safe_pango_markup
 
 # Two characters, in the subscription strip: journal, topic, preprint
@@ -43,6 +43,7 @@ _KIND_GLYPH = {
     "openalex_query": "[T]",
     "crossref_query": "[T]",
     "biorxiv_subject": "[P]",
+    "retraction_watch": "[R]",
 }
 
 
@@ -225,9 +226,16 @@ class FeedWindow(Adw.Window):
         self._add_preprint_btn.set_group(self._add_journal_btn)
         self._add_preprint_btn.connect(
             "toggled", self._on_add_mode_toggled, "preprint")
+        # Retraction Watch is one fixed feed, so this mode has no
+        # entry and no picker — just the button that follows it.
+        self._add_rw_btn = Gtk.ToggleButton(label="Retractions")
+        self._add_rw_btn.set_group(self._add_journal_btn)
+        self._add_rw_btn.connect(
+            "toggled", self._on_add_mode_toggled, "retraction")
         mode_row.append(self._add_journal_btn)
         mode_row.append(self._add_topic_btn)
         mode_row.append(self._add_preprint_btn)
+        mode_row.append(self._add_rw_btn)
         b.append(mode_row)
 
         # Entry: journal-name lookup OR topic free-text.
@@ -324,6 +332,14 @@ class FeedWindow(Adw.Window):
                 "<span size='small' alpha='65%'>OpenAlex full-text "
                 "search, sorted newest first, type:article|review|"
                 "preprint</span>")
+        elif mode == "retraction":
+            self._add_action_btn.set_label("Follow Retraction Watch")
+            self._add_status.set_markup(
+                "<span size='small' alpha='65%'>Reporting on "
+                "retractions, paper mills and research misconduct from "
+                "retractionwatch.com. These are articles about papers, "
+                "not papers, so they are read rather than "
+                "imported.</span>")
         else:
             self._add_action_btn.set_label("Follow selected subjects")
             self._add_status.set_markup(
@@ -333,8 +349,9 @@ class FeedWindow(Adw.Window):
                 "appears in both.</span>")
         # The entry is for the two query modes; preprints choose from
         # a fixed list, because a misspelt subject answers 200 with no
-        # items and would look like a quiet week for ever.
-        self._add_entry.set_visible(mode != "preprint")
+        # items and would look like a quiet week for ever, and
+        # Retraction Watch is a single feed with nothing to type.
+        self._add_entry.set_visible(mode not in ("preprint", "retraction"))
         self._subject_scroller.set_visible(mode == "preprint")
         self._add_results_scroller.set_visible(mode == "journal")
         _clear_box(self._add_results)
@@ -342,6 +359,9 @@ class FeedWindow(Adw.Window):
     def _on_add_query(self, _w):
         if self._add_mode == "preprint":
             self._do_add_subjects()
+            return
+        if self._add_mode == "retraction":
+            self._do_add_retraction_watch()
             return
         q = (self._add_entry.get_text() or "").strip()
         if not q:
@@ -450,6 +470,35 @@ class FeedWindow(Adw.Window):
                          args=(sid,), daemon=True).start()
         # Close the popover; the strip + body update on the next
         # idle cycle.
+        self._add_sub_button.get_popover().popdown()
+
+    def _do_add_retraction_watch(self):
+        """Follow the Retraction Watch blog. One feed, so one
+        subscription and no query — and following it twice would just
+        show every post twice."""
+        already = [s for s in index.list_subscriptions(self.conn)
+                   if s["kind"] == "retraction_watch"]
+        if already:
+            self._add_status.set_markup(
+                "<span size='small' alpha='75%'>Already following "
+                "Retraction Watch.</span>")
+            return
+        try:
+            sid = index.add_subscription(
+                self.conn, "retraction_watch",
+                retractionwatch.SUBSCRIPTION_NAME, "")
+        except Exception as e:
+            self._add_status.set_markup(
+                "<span size='small' foreground='#cc3333'>"
+                "Could not follow: {}</span>".format(
+                    GLib.markup_escape_text(str(e))))
+            return
+        self._add_status.set_markup(
+            "<span size='small'>Following Retraction Watch. Fetching "
+            "first batch…</span>")
+        self._refresh_subscriptions_strip()
+        threading.Thread(target=self._initial_fetch,
+                         args=(sid,), daemon=True).start()
         self._add_sub_button.get_popover().popdown()
 
     def _do_add_subjects(self):
@@ -875,6 +924,19 @@ class FeedWindow(Adw.Window):
         btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
                           spacing=4)
         btn_row.set_halign(Gtk.Align.END)
+        if not art.get("doi") and art.get("oa_url"):
+            # A row with no DOI is not a paper — a Retraction Watch
+            # post is reporting *about* papers. There is nothing to
+            # import and nothing to match against the library, so the
+            # only sensible affordance is to go and read it.
+            read_btn = Gtk.Button(label="Read")
+            read_btn.add_css_class("flat")
+            read_btn.set_tooltip_text(
+                "Open this article in your default browser.")
+            read_btn.connect(
+                "clicked",
+                lambda _b, u=art["oa_url"]: opener.open_external(u))
+            btn_row.append(read_btn)
         if art.get("doi"):
             view_btn = Gtk.Button(label="View")
             view_btn.add_css_class("flat")

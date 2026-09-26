@@ -497,6 +497,13 @@ def refresh_subscription(conn, subscription, limit=FEED_FETCH_ROWS):
         # kinds these rows need no enrichment at all.
         from . import biorxiv
         articles = biorxiv.fetch_subject(query)[:limit]
+    elif kind == "retraction_watch":
+        # One fixed feed, so `query` is unused. These rows are
+        # reporting rather than papers: no DOI, nothing to enrich,
+        # and the loop below skips them for the same reason it skips
+        # a DOI-less journal row.
+        from . import retractionwatch
+        articles = retractionwatch.fetch_posts(limit=limit)
     else:
         return 0, 0
     new_count = 0

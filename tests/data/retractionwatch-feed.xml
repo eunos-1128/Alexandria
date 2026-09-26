@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"
+	xmlns:content="http://purl.org/rss/1.0/modules/content/"
+	xmlns:wfw="http://wellformedweb.org/CommentAPI/"
+	xmlns:dc="http://purl.org/dc/elements/1.1/"
+	xmlns:atom="http://www.w3.org/2005/Atom"
+	xmlns:sy="http://purl.org/rss/1.0/modules/syndication/"
+	xmlns:slash="http://purl.org/rss/1.0/modules/slash/"
+	>
+
+<channel>
+	<title>Retraction Watch</title>
+	<atom:link href="https://retractionwatch.com/feed/" rel="self" type="application/rss+xml" />
+	<link>https://retractionwatch.com</link>
+	<description>Tracking retractions as a window into the scientific process</description>
+	<lastBuildDate>Fri, 25 Sep 2026 15:19:59 +0000</lastBuildDate>
+	<language>en-US</language>
+	<sy:updatePeriod>
+	hourly	</sy:updatePeriod>
+	<sy:updateFrequency>
+	1	</sy:updateFrequency>
+	<generator>https://wordpress.org/?v=7.1.2</generator>
+
+<image>
+	<url>https://retractionwatch.com/wp-content/uploads/2018/02/retractionwatch31-150x150.jpg</url>
+	<title>Retraction Watch</title>
+	<link>https://retractionwatch.com</link>
+	<width>32</width>
+	<height>32</height>
+</image> 
+<site xmlns="com-wordpress:feed-additions:1">73349511</site>	<item>
+		<title>Above and beyond: An editor wanted authors to know they’d been falsely cited</title>
+		<link>https://retractionwatch.com/2026/09/25/above-and-beyond-an-editor-wanted-authors-to-know-theyd-been-falsely-cited/</link>
+					<comments>https://retractionwatch.com/2026/09/25/above-and-beyond-an-editor-wanted-authors-to-know-theyd-been-falsely-cited/#comments</comments>
+		
+		<dc:creator><![CDATA[Alicia Gallegos]]></dc:creator>
+		<pubDate>Fri, 25 Sep 2026 15:01:12 +0000</pubDate>
+				<category><![CDATA[reference problems]]></category>
+		<guid isPermaLink="false">https://retractionwatch.com/?p=136091</guid>
+
+					<description><![CDATA[Like many college professors today, Sarah S. Richardson has seen AI-hallucinated citations in work submitted by her students. But she was surprised when an editor recently contacted her about a hallucinated citation involving her own work.&#160; A March 31 email from the editor in chief of Disability Studies Quarterly explained Richardson was one of six &#8230; <a href="https://retractionwatch.com/2026/09/25/above-and-beyond-an-editor-wanted-authors-to-know-theyd-been-falsely-cited/" class="more-link">Continue reading <span class="screen-reader-text">Above and beyond: An editor wanted authors to know they’d been falsely cited</span></a>]]></description>
+										
+					
+					<wfw:commentRss>https://retractionwatch.com/2026/09/25/above-and-beyond-an-editor-wanted-authors-to-know-theyd-been-falsely-cited/feed/</wfw:commentRss>
+			<slash:comments>1</slash:comments>
+		
+		
+		<post-id xmlns="com-wordpress:feed-additions:1">136091</post-id>	</item>
+<item>
+		<title>Tennessee researcher heads to court amid claims of theft, forgery and revenge</title>
+		<link>https://retractionwatch.com/2026/09/24/tennessee-researcher-heads-to-court-amid-claims-of-theft-forgery-and-revenge/</link>
+					<comments>https://retractionwatch.com/2026/09/24/tennessee-researcher-heads-to-court-amid-claims-of-theft-forgery-and-revenge/#comments</comments>
+		
+		<dc:creator><![CDATA[Alicia Gallegos]]></dc:creator>
+		<pubDate>Thu, 24 Sep 2026 10:00:00 +0000</pubDate>
+				<category><![CDATA[Legal Threats]]></category>
+		<guid isPermaLink="false">https://retractionwatch.com/?p=136083</guid>
+
+					<description><![CDATA[In May 2025, Tennessee authorities were preparing to arrest a university math professor for allegedly soliciting university donations from his students and pocketing the money.&#160; Investigative records paint the picture of a professor who took financial and personal advantage of his students for years – from manipulating them into paying him rent to making them &#8230; <a href="https://retractionwatch.com/2026/09/24/tennessee-researcher-heads-to-court-amid-claims-of-theft-forgery-and-revenge/" class="more-link">Continue reading <span class="screen-reader-text">Tennessee researcher heads to court amid claims of theft, forgery and revenge</span></a>]]></description>
+										
+					
+					<wfw:commentRss>https://retractionwatch.com/2026/09/24/tennessee-researcher-heads-to-court-amid-claims-of-theft-forgery-and-revenge/feed/</wfw:commentRss>
+			<slash:comments>4</slash:comments>
+		
+		
+		<post-id xmlns="com-wordpress:feed-additions:1">136083</post-id>	</item>
+</channel>
+</rss>

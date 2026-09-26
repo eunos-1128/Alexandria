@@ -1514,6 +1514,20 @@ def _migrate_discovered(conn):
         # prunes after 60 days, so it heals itself.
         conn.execute(
             "ALTER TABLE discovered ADD COLUMN authorships_json TEXT")
+    if "source_url" not in cols:
+        # For feed items that are not papers and so have no DOI —
+        # Retraction Watch posts are articles *about* papers. The
+        # table's UNIQUE(subscription_id, doi) cannot fence these,
+        # because SQLite treats every NULL as distinct and the same
+        # post would arrive again on every refresh.
+        conn.execute("ALTER TABLE discovered ADD COLUMN source_url TEXT")
+    # A UNIQUE *index* rather than a constraint: SQLite cannot add a
+    # constraint to an existing table, and this can be created after
+    # the fact. NULLs stay distinct under it, so the DOI-keyed rows
+    # that fill this table are untouched.
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_discovered_sub_url"
+        " ON discovered(subscription_id, source_url)")
     conn.commit()
 
 
@@ -1544,12 +1558,14 @@ def list_subscriptions(conn):
 def add_subscription(conn, kind, name, query, fetch_interval_hours=None):
     """Create a new subscription. `kind` is one of
     'journal_issn' | 'openalex_query' | 'crossref_query' |
-    'biorxiv_subject'.
+    'biorxiv_subject' | 'retraction_watch'.
     `query` is kind-specific: comma-separated ISSNs for
     'journal_issn', a bioRxiv subject slug for 'biorxiv_subject',
-    the raw search string otherwise. Returns the new row id."""
+    unused for 'retraction_watch' (there is one feed, so there is
+    nothing to parameterise), the raw search string otherwise.
+    Returns the new row id."""
     if kind not in ("journal_issn", "openalex_query", "crossref_query",
-                    "biorxiv_subject"):
+                    "biorxiv_subject", "retraction_watch"):
         raise ValueError("unknown subscription kind: " + repr(kind))
     cur = conn.execute(
         "INSERT INTO subscriptions"
@@ -1610,25 +1626,30 @@ def stale_subscriptions(conn,
 
 
 def upsert_discovered(conn, subscription_id, article):
-    """Insert a discovered article (a dict with doi/title/...) if
-    we haven't seen this (subscription, doi) pair before. No-op
-    when the article carries no DOI — the UNIQUE constraint needs
-    something to dedup on and OpenAlex IDs alone aren't enough
-    to fence the dup-detection across providers.
+    """Insert a discovered article (a dict with doi/title/...) if we
+    haven't seen it on this subscription before.
+
+    Dedupe keys on the DOI where there is one — OpenAlex IDs alone
+    aren't enough to fence dup-detection across providers — and
+    otherwise on `source_url`, for feed items that are not papers and
+    never will have a DOI (a Retraction Watch post is an article
+    *about* a paper). An item with neither is a no-op: there would be
+    nothing to recognise it by next time.
 
     Returns True if a row was inserted, False if it was a dup."""
     doi = article.get("doi")
-    if not doi:
+    source_url = article.get("source_url")
+    if not doi and not source_url:
         return False
     cur = conn.execute(
         "INSERT OR IGNORE INTO discovered"
         " (subscription_id, doi, openalex_id, title, authors_json,"
         "  authorships_json,"
         "  journal, year, published_date, abstract, is_oa, oa_url,"
-        "  fetched_at)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "  fetched_at, source_url)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (subscription_id,
-         doi.lower(),
+         doi.lower() if doi else None,
          article.get("openalex_id"),
          article.get("title"),
          json.dumps(article.get("authors") or [],
@@ -1642,8 +1663,12 @@ def upsert_discovered(conn, subscription_id, article):
          article.get("published_date"),
          article.get("abstract"),
          1 if article.get("is_oa") else 0,
-         article.get("oa_url"),
-         datetime.datetime.now().isoformat(timespec="seconds")))
+         # `oa_url` is "where to read this row": the OA PDF for a
+         # paper, the article itself for a feed item that is not one.
+         # `is_oa` stays 0 for the latter, so no OA badge appears.
+         article.get("oa_url") or article.get("url"),
+         datetime.datetime.now().isoformat(timespec="seconds"),
+         source_url))
     return cur.rowcount > 0
 
 
