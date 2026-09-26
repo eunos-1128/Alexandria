@@ -4,6 +4,62 @@ Pending features, roughly grouped. Newest at the top of each section.
 
 ## Top priority
 
+- **Background passes keep working on papers whose files are gone.**
+  Seen 2026-09-25 in the Flatpak, whose index holds 9 rows for PDFs
+  that no longer exist (the library folder they pointed at is now
+  empty). On every start, `_crossref_extras_backfill` walks those
+  rows, **makes a CrossRef call for each one**, then fails:
+
+      [crossref] sidecar write failed for …/zbc14565.pdf:
+          [Errno 2] No such file or directory: '…/zbc14565.pdf.alexandria'
+
+  one every three seconds, for ever, on every launch. Undesirable
+  rather than broken: nothing is corrupted, but the application
+  spends network calls and log lines on papers it cannot act on, and
+  a user watching the log sees a stream of errors about files they
+  deliberately moved.
+
+  **Three separate faults, worth separating:**
+
+  1. **No existence check before the work.** The pass fetches from
+     CrossRef *first* and only then discovers the sidecar is missing,
+     so the wasted call is made every time. A `os.path.exists` on the
+     sidecar costs microseconds. The same applies to the other
+     background walks — PDB indexing, the citation refresher — which
+     have not been checked for this.
+  2. **The message names the wrong operation.** It says "sidecar
+     write failed"; the failure is in `sidecar.read` on the line
+     above. Anyone debugging this starts in the wrong place.
+  3. **Nothing ever notices the row is unbacked.** Which is where the
+     constraint is.
+
+  **The constraint: do not simply prune.** `reconcile_startup`
+  already declines to delete missing entries on purpose — *"a
+  temporarily unmounted share would otherwise wipe the index"* — and
+  that reasoning stands. A NAS that is slow to mount must not cost
+  the user their library. So the fix is not "delete rows whose file
+  is absent".
+
+  **Suggested shape:**
+
+    - Skip, do not delete: every background pass checks the file
+      exists before spending anything on the row. Cheap, safe, and
+      fixes the observed waste on its own.
+    - Say so once, in the UI rather than the log: "9 papers in this
+      catalogue have no file" with a way to see them, and an explicit
+      *Remove from library* the user chooses. That respects the
+      unmounted-share case — the user knows whether the disk is
+      missing or the papers are.
+    - Consider a `missing_since` stamp so a row absent for a long
+      time can be offered for removal with more confidence than one
+      absent since this morning.
+
+  Worth knowing for the Flathub release: the sandbox makes this more
+  likely, not less. A Flatpak install has its own index, sees only
+  `~/Documents`, and will point at files the user moved without it
+  noticing.
+
+
 - **DONE 2026-09-12 — fault 2 fixed, fault 1 now self-healing**
   (`acbda9a`). The dispatch moved where the entry said it belonged:
   `importer.import_pdf_or_attach` is now the single entry point that
