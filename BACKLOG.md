@@ -4,6 +4,28 @@ Pending features, roughly grouped. Newest at the top of each section.
 
 ## Top priority
 
+- **PARTLY DONE 2026-10-03.** The two cheap faults are fixed; the
+  third, which was the constrained one, is not.
+
+    - **Skip before spending.** `_row_is_backed` checks the PDF
+      exists, and the CrossRef backfill, the citation refresher and
+      PDB indexing all consult it before their network call. PDB
+      indexing was the one not noticed at filing time: it asks Europe
+      PMC *before* falling back to the PDF's own text, so a missing
+      file cost a call there too.
+    - **The log says what failed.** The CrossRef pass now reports
+      "sidecar read failed" for a read, in its own handler, rather
+      than blaming the write on the line below.
+    - **Still open: nothing notices the row is unbacked.** No UI, no
+      `missing_since`, no offer to remove — see the suggested shape
+      below, which stands as written. The rows are now free, so this
+      is a question of telling the user, not of cost.
+
+  The check is the PDF, not the sidecar: a missing PDF means the
+  paper is gone, while a sidecar missing beside a PDF that is still
+  there is a different fault and worth repairing rather than
+  skipping. Original entry:
+
 - **Background passes keep working on papers whose files are gone.**
   Seen 2026-09-25 in the Flatpak, whose index holds 9 rows for PDFs
   that no longer exist (the library folder they pointed at is now

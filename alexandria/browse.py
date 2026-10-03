@@ -805,6 +805,26 @@ def make_metadata_chip(record, parent_window=None, pdf_path=None,
     return btn
 
 
+def _row_is_backed(row):
+    """Is this row's paper still on disk?
+
+    `watcher.reconcile_startup` deliberately does not delete index
+    rows whose files have gone — "a temporarily unmounted share would
+    otherwise wipe the index" — which is right, and means every
+    background walk meets those rows on every pass. Without this they
+    spend a network call each before discovering there is nothing to
+    write the answer into: observed 2026-09-25 as four CrossRef
+    lookups per launch against a library folder that had been
+    deleted.
+
+    Checks the PDF rather than the sidecar. A missing PDF is "this
+    paper is gone"; a missing sidecar beside a PDF that is still
+    there is a different fault, and one worth repairing rather than
+    skipping."""
+    pdf = row.get("pdf_path")
+    return not pdf or os.path.exists(pdf)
+
+
 def _plain_summary_label(text):
     """The summary as a wrapping Label, rendering the subset
     `markdown_to_pango` knows. Used when markdown-it-py is absent —
@@ -3555,6 +3575,8 @@ class BrowserWindow(Adw.ApplicationWindow):
             doi = row.get("doi")
             if not doi:
                 continue
+            if not _row_is_backed(row):
+                continue
             (n, src, kw, abstract, authorships, cby,
              oa_title, oa_year, is_oa, oa_status,
              funders, grants) = metrics.fetch_metrics(doi)
@@ -3691,6 +3713,10 @@ class BrowserWindow(Adw.ApplicationWindow):
                 doi = row.get("doi")
                 if not doi:
                     continue
+                if not _row_is_backed(row):
+                    # Before the network call, not after it: there is
+                    # nowhere to put the answer.
+                    continue
                 try:
                     extras = metrics.fetch_crossref_extras(doi)
                 except Exception as e:
@@ -3704,6 +3730,18 @@ class BrowserWindow(Adw.ApplicationWindow):
                     continue
                 try:
                     rec = sidecar.read(row["sidecar_path"])
+                except Exception as e:
+                    # Named separately from the write below: this said
+                    # "sidecar write failed" for a read that failed,
+                    # which sends anyone debugging it to the wrong
+                    # line.
+                    _wlog("crossref",
+                          "sidecar read failed for {}: {}".format(
+                              row.get("pdf_path"), e))
+                    if self._lic_stop.wait(pause_seconds):
+                        return
+                    continue
+                try:
                     if extras.get("license"):
                         rec["license"] = extras["license"]
                     if extras.get("crossmark"):
@@ -3759,6 +3797,11 @@ class BrowserWindow(Adw.ApplicationWindow):
             for row in rows:
                 if self._pdb_stop.is_set():
                     return
+                if not _row_is_backed(row):
+                    # This one asks Europe PMC before it falls back to
+                    # the PDF's own text, so a missing file costs a
+                    # network call too.
+                    continue
                 try:
                     n = pdb_mentions.index_pdb_mentions_for_paper(
                         conn, row["id"])
