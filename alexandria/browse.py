@@ -53,6 +53,31 @@ from . import (index, edit_dialog, importer, metrics, sidecar, extract,
                funding_links, doi_import_dialog, jats, theme,
                reload_policy, sandbox)
 
+# `summary_view` pulls in markdown-it-py, ~19 ms of import on this
+# machine, to render something nobody sees until they click a summary
+# chip. So it is imported on first use instead of at startup. `False`
+# records "tried, and absent", so a missing dependency costs one
+# failed import rather than one per summary.
+_summary_view = None
+
+
+def _summary_renderer():
+    """The `summary_view` module, imported on first use, or None when
+    markdown-it-py is not installed.
+
+    Only the summary popover needs it, and it has a plainer fallback,
+    so a missing dependency costs that one rendering rather than the
+    whole application failing to start."""
+    global _summary_view
+    if _summary_view is None:
+        try:
+            from . import summary_view
+        except ImportError:
+            _summary_view = False
+        else:
+            _summary_view = summary_view
+    return _summary_view or None
+
 LIBRARY_ROOT = prefs.get_library_root()
 
 # Headroom we want to leave on the daily OpenAlex quota for
@@ -780,6 +805,45 @@ def make_metadata_chip(record, parent_window=None, pdf_path=None,
     return btn
 
 
+def _plain_summary_label(text):
+    """The summary as a wrapping Label, rendering the subset
+    `markdown_to_pango` knows. Used when markdown-it-py is absent —
+    an installation predating the dependency shows a readable summary
+    rather than nothing."""
+    body = Gtk.Label(xalign=0.0)
+    body.set_wrap(True)
+    body.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+    body.set_max_width_chars(80)
+    body.set_selectable(True)
+    body.set_markup(markdown_to_pango(text))
+    return body
+
+
+def _fill_summary_body(pop, scroll, text, built):
+    """Render `text` into `scroll`, in the theme `pop` is being drawn
+    in. Called when the popover maps; a no-op if the body is already
+    there in the right theme.
+
+    A module-level function rather than a closure so a test can drive
+    it without opening a real popover — popping one up needs a mapped
+    parent window and a settled display, which makes for tests that
+    pass two runs in three.
+
+    On a theme change the body is rebuilt rather than restyled: the
+    tag colours are baked into the buffer's tag table as the text is
+    laid down."""
+    renderer = _summary_renderer()
+    if renderer is None:
+        if scroll.get_child() is None:
+            scroll.set_child(_plain_summary_label(text))
+        return
+    dark = _is_dark_theme(pop)
+    if built.get("dark") == dark:
+        return
+    built["dark"] = dark
+    scroll.set_child(renderer.make_summary_view(text, dark))
+
+
 def make_summary_chip(summary):
     """Button opening the paper's summary in a popover.
 
@@ -824,21 +888,28 @@ def make_summary_chip(summary):
                 GLib.markup_escape_text(tier)) if tier else ""))
     box.append(head)
 
-    body = Gtk.Label(xalign=0.0)
-    body.set_wrap(True)
-    body.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-    body.set_max_width_chars(80)
-    body.set_selectable(True)
-    # Summaries are written in Markdown; render the subset
-    # markdown_to_pango handles and leave the rest as literal text.
-    body.set_markup(markdown_to_pango(
-        (summary.get("text") or "").strip()))
     scroll = Gtk.ScrolledWindow()
     scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
     scroll.set_propagate_natural_height(True)
     scroll.set_max_content_height(320)
-    scroll.set_child(body)
     box.append(scroll)
+
+    text = (summary.get("text") or "").strip()
+
+    # The body is built when the popover is first shown, not now.
+    # Two reasons, and the first is the one that forces it:
+    # `_is_dark_theme` reads a *realized, styled* widget's resolved
+    # foreground, and nothing here is realized while the card is
+    # being built — an unrealized widget answers with a default
+    # colour rather than failing, so the fallback would not fire and
+    # every summary would be styled for the light theme. The second
+    # is that a library reload builds every card's popover, and
+    # parsing Markdown for summaries nobody opens is work thrown
+    # away.
+    built = {"dark": None}
+
+    pop.connect("map",
+                lambda *_a: _fill_summary_body(pop, scroll, text, built))
 
     foot_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
     foot = Gtk.Label(xalign=0.0)

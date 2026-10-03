@@ -34,6 +34,9 @@ dependencies = [
     # page range in a style asking for page-range-format="chicago-16".
     # All fixed upstream; we were simply four releases behind.
     "citeproc-py>=0.11.1",
+    # CommonMark parser for rendering paper summaries (summary_view.py);
+    # tables and strikethrough are built in, no plugins needed.
+    "markdown-it-py>=3",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -72,4 +75,5 @@ exclude = ["tests*"]
 [tool.setuptools.package-data]
 # The CSL styles, and our own symbolic icons for the viewer sidebar
 # (the system theme has no table-of-contents or highlighter glyph).
-alexandria = ["styles/*.csl", "icons/hicolor/scalable/actions/*.svg"]
+alexandria = ["styles/*.csl", "icons/hicolor/scalable/actions/*.svg",
+              "summary_style.json"]
