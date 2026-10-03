@@ -12,22 +12,22 @@
   <description>
     <p>
       Alexandria is a GTK4 library for managing scientific papers.
-      Point it at a directory of PDFs and it extracts metadata (title,
-      authors, year, DOI, journal) from XMP, page text, CrossRef and
+      Typically starting with a directory of PDFs, it extracts metadata (title,
+      authors, year, DOI, journal) from the page text, CrossRef and
       OpenAlex, then presents a searchable, filterable card browser.
+      Alexandria tries to make it easy to find and add related papers.
     </p>
     <ul>
       <li>Full-text search across title, authors, abstract, DOI and journal</li>
       <li>Citation counts and per-year sparklines from OpenAlex</li>
       <li>Built-in PDF viewer with highlight and comment annotations,
-        and click-through citation links that jump to the reference
-        and back again</li>
+        and click-through citation links that jump to the reference</li>
       <li>A viewer sidebar with the paper's table of contents, page
         thumbnails and your highlights</li>
       <li>Structured full text (JATS XML) fetched from Europe PMC and
-        stored beside the PDF, giving exact reference lists</li>
+        stored beside the PDF</li>
       <li>Authors window: a persistent trail of the authors you follow,
-        with their works, collaborators and affiliation history</li>
+        with their works, collaborators, funding and affiliation history</li>
       <li>Journal and topic subscriptions, flagging new papers by
         authors you have looked up before</li>
       <li>BibTeX, RIS and CSL export; BibTeX and DOI import</li>
@@ -36,7 +36,8 @@
         information recognised as belonging to its parent paper</li>
       <li>An MCP server, so an AI assistant you already use can search
         and read your library — no model or API key inside the app</li>
-      <li>Sidecar JSON metadata lives next to each PDF, never inside it</li>
+      <li>Sidecar JSON metadata lives next to each PDF - so it's easily
+        transportable</li>
     </ul>
   </description>
 
@@ -45,7 +46,19 @@
   <screenshots>
     <screenshot type="default">
       <caption>Browsing the library</caption>
-      <image>https://raw.githubusercontent.com/pemsley/Alexandria/main/data/screenshots/screenshot.png</image>
+      <image>https://raw.githubusercontent.com/pemsley/Alexandria/main/data/screenshots/main-window-screenshot.png</image>
+    </screenshot>
+    <screenshot type="default">
+      <caption>Author Dialog</caption>
+      <image>https://raw.githubusercontent.com/pemsley/Alexandria/main/data/screenshots/author-window-screenshot.png</image>
+    </screenshot>
+    <screenshot type="default">
+      <caption>Main Window in Dark Mode</caption>
+      <image>https://raw.githubusercontent.com/pemsley/Alexandria/main/data/screenshots/screenshot-dark-mode-main-window-view.png</image>
+    </screenshot>
+    <screenshot type="default">
+      <caption>Author Dialog in Dark Mode</caption>
+      <image>https://raw.githubusercontent.com/pemsley/Alexandria/main/data/screenshots/screenshot-dark-mode-author-view.png</image>
     </screenshot>
   </screenshots>
 
