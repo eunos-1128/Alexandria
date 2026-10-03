@@ -6221,7 +6221,11 @@ class BrowserWindow(Adw.ApplicationWindow):
             "can get in touch about unusual traffic, and give politer "
             "rate limits to requests that carry one. Unpaywall "
             "requires one — without it, Alexandria will not look "
-            "there for open-access PDFs.")
+            "there for open-access PDFs.\n"
+            "An OpenAlex API key is free from "
+            "openalex.org/settings/api. It gives you a private daily "
+            "budget; without one you draw on the pool that every "
+            "unkeyed copy shares, which runs out.")
         email_row = Adw.EntryRow()
         email_row.set_title("Contact email")
         email_row.set_text(prefs.get_contact_email())
@@ -6237,6 +6241,35 @@ class BrowserWindow(Adw.ApplicationWindow):
         email_row.connect("apply", _save_email)
         email_row.connect("changed", _save_email)
         net_group.add(email_row)
+
+        # Masked, as the platform masks a secret — with the caveat
+        # that it is stored in config.json as plain text either way,
+        # so this is shoulder-surfing cover and nothing more.
+        key_row = Adw.PasswordEntryRow()
+        key_row.set_title("OpenAlex API key")
+        key_row.set_text(prefs.get_openalex_api_key())
+
+        def _save_key(row, *_a):
+            key = (row.get_text() or "").strip()
+            prefs.set_openalex_api_key(key)
+            # Takes effect at once rather than at the next start, and
+            # `metrics` also releases the breaker an auth failure
+            # tripped — so a key pasted in response to "OpenAlex
+            # rejected our key" is tried straight away.
+            metrics.set_openalex_api_key(key)
+
+        if os.environ.get("ALEXANDRIA_OPENALEX_API_KEY"):
+            # The env var wins inside `metrics`, so anything typed
+            # here would be saved and then ignored. Say so instead of
+            # offering a box that does nothing.
+            key_row.set_sensitive(False)
+            key_row.set_tooltip_text(
+                "Overridden by the ALEXANDRIA_OPENALEX_API_KEY "
+                "environment variable, which takes precedence.")
+        else:
+            key_row.connect("apply", _save_key)
+            key_row.connect("changed", _save_key)
+        net_group.add(key_row)
         page.add(net_group)
 
         page.add(marks_group)
