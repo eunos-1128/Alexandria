@@ -187,9 +187,9 @@ def test_both_streams_survive_a_rotation(start_log):
     """The two tees share one handle: with a handle each, stderr would
     go on writing to the closed file after a rotation -- silently,
     since a log is never worth an exception."""
-    path = start_log(max_bytes=200)
+    path = start_log(max_bytes=4096)
 
-    for i in range(40):
+    for i in range(400):
         print("stdout line {}".format(i))
     print("stderr still works", file=sys.stderr)
 
@@ -244,3 +244,62 @@ def test_logging_starts_before_anything_prints():
     assert "applog.start_file_logging()" in src
     assert (src.index("applog.start_file_logging()")
             < src.index("prefs.ensure_config_file()"))
+
+
+# ---- what build wrote this log ---------------------------------------
+
+def test_the_banner_names_the_build():
+    """A copied log is what a bug report carries; until this it said
+    nothing about which Alexandria wrote it."""
+    fields = dict(f.split("=", 1) for f in applog.environment()
+                  if "=" in f)
+
+    assert fields["alexandria"]
+    assert fields["flatpak"] in ("no",) or fields["flatpak"]
+    assert fields["python"]
+
+
+def test_poppler_is_in_it():
+    """The Flatpak bundles its own: on 2026-10-03 the published build
+    carried 24.11.0 while the host ran 26.08.0, which is exactly the
+    difference that makes a rendering bug unreproducible."""
+    assert any(f.startswith("poppler=") for f in applog.environment())
+
+
+def test_a_broken_lookup_does_not_stop_startup(monkeypatch):
+    """This runs before the GUI exists."""
+    import builtins
+
+    real = builtins.__import__
+
+    def boom(name, *a, **k):
+        if name == "platform":
+            raise ImportError("no platform module")
+        return real(name, *a, **k)
+
+    monkeypatch.setattr(builtins, "__import__", boom)
+    try:
+        with pytest.raises(ImportError):
+            applog.environment()
+    finally:
+        monkeypatch.setattr(builtins, "__import__", real)
+
+
+def test_the_banner_is_at_the_head_of_the_log(start_log):
+    path = start_log()
+
+    first = _contents(path).strip().split("\n")[0]
+
+    assert "logging to" in first
+
+
+def test_a_rotated_log_is_given_the_banner_again(start_log):
+    """Without it a rotated log has no header at all -- the half of a
+    report that says which build it is."""
+    path = start_log(max_bytes=4096)
+
+    for i in range(400):
+        print("filler line {}".format(i))
+
+    assert any("alexandria=" in ln for ln in _contents(path).split("\n")), \
+        "the current file carries the banner after rotation"

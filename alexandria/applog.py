@@ -113,10 +113,15 @@ class _LogFile:
     since a log is never worth an exception. stderr losing its lines
     at the moment the log fills up is precisely the wrong failure."""
 
-    def __init__(self, path, handle, max_bytes):
+    def __init__(self, path, handle, max_bytes, banner=()):
         self.path = path
         self._handle = handle
-        self._max = max_bytes
+        # Floored: the banner is re-emitted on every rotation, so a
+        # limit smaller than the banner would rotate on each line and
+        # grind the log down to a header. 4 KiB is well under any real
+        # setting and still lets a test exercise rotation.
+        self._max = max(max_bytes, 4096)
+        self._banner = list(banner)
         self._lock = threading.Lock()
 
     def write_line(self, line):
@@ -135,6 +140,13 @@ class _LogFile:
         self._handle.close()
         rotate(self.path, max_bytes=0)
         self._handle = open(self.path, "a", encoding="utf-8")
+        # Written straight to the handle, not through `log()`: we are
+        # inside `write_line` with the lock held, and the lock is not
+        # reentrant. Without this a rotated log has no header, which
+        # is the half of a bug report that says which build it is.
+        for line in self._banner:
+            self._handle.write("[{}] {}\n".format(timestamp(), line))
+        self._handle.flush()
 
 
 class _Tee:
@@ -183,6 +195,59 @@ def _looks_stamped(line):
             and line[6] == ":" and line[9] == ".")
 
 
+def environment():
+    """What build this is, as `key=value` strings for the head of the
+    log.
+
+    A copied log is what a bug report carries, and until this it said
+    nothing about which Alexandria wrote it. Poppler is in the list
+    because the Flatpak bundles its own: on 2026-10-03 the published
+    build was carrying 24.11.0 while this machine ran 26.08.0, which
+    is exactly the kind of difference that makes a rendering bug
+    impossible to reproduce.
+
+    Every lookup is guarded: this runs before the GUI exists and must
+    not be the thing that stops the application starting."""
+    import platform
+
+    out = []
+    try:
+        from . import __version__
+        out.append("alexandria={}".format(__version__))
+    except Exception:
+        pass
+    try:
+        from . import sandbox
+        if sandbox.in_flatpak():
+            out.append("flatpak={}".format(sandbox.app_id() or "yes"))
+        else:
+            out.append("flatpak=no")
+    except Exception:
+        pass
+    out.append("python={}".format(platform.python_version()))
+    try:
+        from gi.repository import Gtk
+        out.append("gtk={}.{}.{}".format(Gtk.get_major_version(),
+                                         Gtk.get_minor_version(),
+                                         Gtk.get_micro_version()))
+    except Exception:
+        pass
+    try:
+        from gi.repository import Adw
+        out.append("libadwaita={}.{}.{}".format(
+            Adw.MAJOR_VERSION, Adw.MINOR_VERSION, Adw.MICRO_VERSION))
+    except Exception:
+        pass
+    try:
+        import gi
+        gi.require_version("Poppler", "0.18")
+        from gi.repository import Poppler
+        out.append("poppler={}".format(Poppler.get_version()))
+    except Exception:
+        pass
+    return out
+
+
 def start_file_logging(path=None, max_bytes=MAX_BYTES):
     """Tee stdout and stderr into the log file. Returns its path, or
     None when it could not be opened — a read-only home should cost
@@ -197,11 +262,13 @@ def start_file_logging(path=None, max_bytes=MAX_BYTES):
         handle = open(path, "a", encoding="utf-8")
     except OSError:
         return None
-    logfile = _LogFile(path, handle, max_bytes)
+    banner = ["logging to {}".format(path)] + environment()
+    logfile = _LogFile(path, handle, max_bytes, banner=banner)
     sys.stdout = _Tee(sys.stdout, logfile)
     sys.stderr = _Tee(sys.stderr, logfile)
     _tee_installed = True
-    log("log", "logging to {}".format(path))
+    for line in banner:
+        log("log", line)
     return path
 
 
