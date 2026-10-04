@@ -54,7 +54,7 @@
     </screenshot>
     <screenshot type="default">
       <caption>Main Window in Dark Mode</caption>
-      <image>https://raw.githubusercontent.com/pemsley/Alexandria/main/data/screenshots/screenshot-dark-mode-main-window-view.png</image>
+      <image>https://raw.githubusercontent.com/pemsley/Alexandria/main/data/screenshots/screenshot-dark-mode-main-window.png</image>
     </screenshot>
     <screenshot type="default">
       <caption>Author Dialog in Dark Mode</caption>
@@ -73,6 +73,29 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.8.0" date="2026-10-04">
+      <url type="details">https://github.com/pemsley/Alexandria/blob/main/RELEASE-NOTES</url>
+      <description>
+        <p>
+          Summaries that read as they were written, and an
+          application that can say what it did.
+        </p>
+        <ul>
+          <li>Paper summaries are rendered as Markdown: headings,
+            nested lists, quotations and code blocks, instead of the
+            asterisks and backticks they used to show</li>
+          <li>The OpenAlex API key can be set in Preferences, rather
+            than only by editing a configuration file by hand</li>
+          <li>Help &#8594; Show Log, with a Copy button for pasting
+            into a bug report — there is no terminal to read when the
+            application is launched from an icon</li>
+          <li>The status bar names the file it is talking about, and
+            says when a paper has been added</li>
+          <li>Papers whose files have been moved or deleted no longer
+            cost a network lookup on every launch</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.7.1" date="2026-09-26">
       <url type="details">https://github.com/pemsley/Alexandria/blob/main/RELEASE-NOTES</url>
       <description>
