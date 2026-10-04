@@ -1,3 +1,37 @@
+  Release Notes for 0.8.0
+
+ o FEATURE: Paper summaries are rendered properly. A summary is
+            written in Markdown, and until now it was shown through a
+            handful of regular expressions that knew bold, italic,
+            code and little else, so nested lists, quotations, tables
+            and code blocks were not correctly interpetted. They are
+            now parsed as CommonMark.
+
+ o FEATURE: The OpenAlex API key can be set in Preferences.
+
+ o FEATURE: Help -> Show Log. Alexandria now writes everything it
+            prints to a log file as well as to the terminal, and
+            shows it in a window with a Copy button. This should
+            make bug reports easier to make.
+
+ o CHANGE:  The status bar names the file it is talking about instead
+            of "Library updated (deleted)".
+
+ o CHANGE:  Adding a paper from an author's page says so. The import
+            was done by the application itself, so the folder watcher
+            recognised its own work and stayed silent, and the main
+            window said nothing at all.
+
+ o CHANGE:  Log lines carry the time. Without one there was no way to
+            tell whether two events were a second apart or an hour.
+
+ o BUG-FIX: Papers whose files have been moved or deleted no longer
+            cost a network lookup on every launch. Alexandria
+            deliberately keeps the index entry, in case the file is
+            on a drive that has not been mounted yet (for example).
+
+-----
+
   Release Notes for 0.7.1
 
  o FEATURE: A first run now asks where your library should live,
