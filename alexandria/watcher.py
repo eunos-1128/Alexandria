@@ -22,13 +22,21 @@ import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gio, GLib
 
-from . import bibtex_import, importer, index, sidecar
+from . import applog, bibtex_import, importer, index, sidecar
 
 
 # How long to wait between batched events from the OS. Lets a
 # `cp ~/Desktop/*.pdf ~/pdfs/` of 50 PDFs collapse into a few events
 # rather than 50 simultaneous import threads.
 RATE_LIMIT_MS = 1500
+
+
+def _log(msg):
+    """One watcher line, timestamped and tagged like the rest of the
+    application's log — see `applog`. The watcher's lines are the ones
+    most often read against something the user just did, so a clock on
+    them is the whole point."""
+    applog.log("watcher", msg)
 
 
 def _is_pdf(path):
@@ -118,7 +126,7 @@ class LibraryWatcher:
 
     def start(self):
         if self.monitor:
-            print("[watcher] start: already running")
+            _log("start: already running")
             return
         # A missing root is a normal state — a fresh library, or the
         # user cleared the folder. Create it and watch it; declining
@@ -127,10 +135,10 @@ class LibraryWatcher:
         if not os.path.isdir(self.root):
             try:
                 os.makedirs(self.root, exist_ok=True)
-                print("[watcher] created library root: {}".format(
+                _log("created library root: {}".format(
                     self.root))
             except OSError as e:
-                print("[watcher] start: cannot create root {!r}: {}"
+                _log("start: cannot create root {!r}: {}"
                       .format(self.root, e))
                 return
         try:
@@ -138,12 +146,12 @@ class LibraryWatcher:
             self.monitor = gfile.monitor_directory(
                 Gio.FileMonitorFlags.WATCH_MOVES, None)
         except GLib.Error as e:
-            print("[watcher] monitor_directory failed:", e)
+            _log("monitor_directory failed: {}".format(e))
             self.monitor = None
             return
         self.monitor.set_rate_limit(RATE_LIMIT_MS)
         self.monitor.connect("changed", self._on_changed)
-        print("[watcher] watching {} (rate-limit {}ms)".format(
+        _log("watching {} (rate-limit {}ms)".format(
             self.root, RATE_LIMIT_MS))
 
     def stop(self):
@@ -183,12 +191,12 @@ class LibraryWatcher:
                 conn, self.root, on_progress=count,
                 skip_roots=self.skip_roots)
         except Exception as e:
-            print("LibraryWatcher: reconcile failed:", e)
+            _log("reconcile failed: {}".format(e))
             return
         finally:
             conn.close()
         if tally:
-            print("[watcher] reconcile: {}".format(
+            _log("reconcile: {}".format(
                 ", ".join("{} {}".format(n, status)
                           for status, n in sorted(tally.items()))))
         if self.on_change:
@@ -202,10 +210,10 @@ class LibraryWatcher:
 
         et = event_type
         et_name = getattr(et, "value_nick", str(et))
-        print("[watcher] event={} path={} other={}".format(
+        _log("event={} path={} other={}".format(
             et_name, path, other))
         if self._is_suppressed(path) or self._is_suppressed(other):
-            print("[watcher] suppressed (in-flight ghost-merge)")
+            _log("suppressed (in-flight ghost-merge)")
             return
         if et in (Gio.FileMonitorEvent.CREATED,
                   Gio.FileMonitorEvent.CHANGES_DONE_HINT,
@@ -277,7 +285,7 @@ class LibraryWatcher:
         finally:
             conn.close()
         if known and self.on_change:
-            print("[watcher] sidecar rewritten elsewhere; reloading: {}"
+            _log("sidecar rewritten elsewhere; reloading: {}"
                   .format(os.path.basename(sc_path)))
             GLib.idle_add(self.on_change, "sidecar-refresh")
 
@@ -285,7 +293,7 @@ class LibraryWatcher:
         threading.Thread(target=fn, args=args, daemon=True).start()
 
     def _do_import(self, path):
-        print("[watcher] import start: {}".format(path))
+        _log("import start: {}".format(path))
         if self.on_import_start:
             GLib.idle_add(self.on_import_start, os.path.basename(path))
         conn = index.connect_existing(self.db_path)
@@ -310,7 +318,7 @@ class LibraryWatcher:
                 conn, path, self.root, suppress=self._suppress_path,
                 on_progress=progress)
         except Exception as e:
-            print("[watcher] import failed for {}: {}".format(path, e))
+            _log("import failed for {}: {}".format(path, e))
             return
 
         if new_path:
@@ -318,17 +326,17 @@ class LibraryWatcher:
             # follow-up edits aren't dropped.
             with self._suppress_lock:
                 self._suppress.pop(os.path.abspath(new_path), None)
-            print("[watcher] ghost-merge: {} -> {} ({})".format(
+            _log("ghost-merge: {} -> {} ({})".format(
                 path, status, new_path))
             if self.on_change:
                 GLib.idle_add(self.on_change, status)
             return
 
         if status == "duplicate" and rec:
-            print("[watcher] import done: {} -> duplicate of {}".format(
+            _log("import done: {} -> duplicate of {}".format(
                 path, rec.get("pdf_path") or "?"))
         else:
-            print("[watcher] import done: {} -> {}".format(path, status))
+            _log("import done: {} -> {}".format(path, status))
         # "recent" is the no-op self-event case; don't bother the UI.
         if status in ("recent",):
             return
@@ -340,7 +348,7 @@ class LibraryWatcher:
         try:
             importer.delete_pdf(conn, path)
         except Exception as e:
-            print("watcher: delete failed for {}: {}".format(path, e))
+            _log("delete failed for {}: {}".format(path, e))
             return
         finally:
             conn.close()

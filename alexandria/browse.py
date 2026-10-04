@@ -51,7 +51,7 @@ from . import (index, edit_dialog, importer, metrics, sidecar, extract,
                csl_export, opener, references_pdf, discover, csl_format,
                feed, feed_window, import_toast, pdb_mentions,
                funding_links, doi_import_dialog, jats, theme,
-               reload_policy, sandbox)
+               reload_policy, sandbox, applog)
 
 # `summary_view` pulls in markdown-it-py, ~19 ms of import on this
 # machine, to render something nobody sees until they click a summary
@@ -100,16 +100,14 @@ from .markup import (safe_pango_markup,  # noqa: E402,F401  (re-export)
 
 
 def _wlog(tag, msg):
-    """Timestamped stderr line for worker threads. Many of these run
+    """Timestamped line for worker threads. Many of these run
     concurrently (citations / author-score / PDB / CrossRef / feed
     / watcher reconcile), and untagged `print()` lines from each are
-    indistinguishable in the terminal. Format: HH:MM:SS.mmm with the
-    short tag and current-thread name so we can tell who's doing
-    what and when."""
-    ts = time.strftime("%H:%M:%S") + "." + "{:03d}".format(
-        int((time.time() % 1) * 1000))
-    th = threading.current_thread().name
-    print("[{} {} {}] {}".format(ts, tag, th, msg), flush=True)
+    indistinguishable in the terminal.
+
+    The format lives in `applog` so the watcher's lines and these
+    interleave in one shape rather than two."""
+    applog.log(tag, msg)
 
 
 def _sqlite_err_info(e):
