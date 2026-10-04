@@ -398,6 +398,26 @@ stops working the moment it is false.
   `~/Documents` work without the portal at all, and Flathub accepts it
   readily. That is a change to the Flathub PR, not to this repository.
 
+- **DONE 2026-10-04 (the cheap half).** `applog` writes
+  `$XDG_STATE_HOME/Alexandria/alexandria.log`, and **Help → Show Log**
+  shows it with a Copy button for pasting into a bug report. The file
+  is written *alongside* the terminal: stdout and stderr are teed, so
+  all 58 `print("[…]")` sites land in it without one of them being
+  rewritten, and a line that carries no timestamp is given one on the
+  way in. Two files of 2 MB, rotated at startup and again if a long
+  session outgrows it.
+
+  Shown in-app rather than handed to an external viewer: under Flatpak
+  the log sits inside the sandbox's own directory, and the thing the
+  user needs to do with it is copy it, not edit it. The path is on the
+  window, selectable, for anyone who would rather open it themselves.
+
+  **Still open: levels.** The entry calls that the honest version and
+  it remains true — routine chatter and failures are still
+  indistinguishable, and a user cannot be asked for "just the errors".
+  That is the `logging` migration, 58 call sites, and a separate job.
+  Original entry:
+
 - **Diagnostics the user can find.** Nearly every fix this month
   began with a terminal: the sidebar off-by-one, the import that
   hung, the summary showing raw Markdown. There are **58 `print("[…]`

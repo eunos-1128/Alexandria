@@ -51,7 +51,7 @@ from . import (index, edit_dialog, importer, metrics, sidecar, extract,
                csl_export, opener, references_pdf, discover, csl_format,
                feed, feed_window, import_toast, pdb_mentions,
                funding_links, doi_import_dialog, jats, theme,
-               reload_policy, sandbox, applog)
+               reload_policy, sandbox, applog, log_window)
 
 # `summary_view` pulls in markdown-it-py, ~19 ms of import on this
 # machine, to render something nobody sees until they click a summary
@@ -2104,6 +2104,7 @@ class BrowserWindow(Adw.ApplicationWindow):
         hamburger_menu.append_section(None, tools_section)
         hamburger_menu.append("Preferences…", "win.preferences")
         hamburger_menu.append("Keyboard Shortcuts", "win.shortcuts")
+        hamburger_menu.append("Show Log", "win.show-log")
         hamburger_menu.append("About Alexandria", "win.about")
         hamburger_btn = Gtk.MenuButton()
         hamburger_btn.set_icon_name("open-menu-symbolic")
@@ -2947,6 +2948,7 @@ class BrowserWindow(Adw.ApplicationWindow):
             ("toggle-terminal", self._on_toggle_terminal),
             ("jats-backfill", self._on_jats_backfill),
             ("shortcuts",     self._open_shortcuts),
+            ("show-log",      self._open_log),
             ("about",         self._open_about),
             ("new-catalogue", self._on_new_catalogue),
             ("remove-catalogue", self._on_remove_catalogue),
@@ -6103,6 +6105,11 @@ class BrowserWindow(Adw.ApplicationWindow):
     def _open_subscriptions(self, _btn):
         feed_window.open_window(self, self.conn)
 
+    def _open_log(self, _btn):
+        """Help → Show Log. The file is written by `applog` from the
+        first line of `main`; this is the half the user can reach."""
+        log_window.open_window(self)
+
     def _open_authors(self, _btn):
         author_works.open_trail_window(self, self.conn)
 
@@ -6476,6 +6483,12 @@ def main(argv=None):
     # --light pins the app to light mode (e.g. for screen recording)
     # regardless of the desktop colour-scheme preference.
     force_light = "--light" in argv[1:]
+
+    # Before anything else prints: everything on stdout and stderr is
+    # teed into a log file the user can be asked for. Launched from a
+    # desktop icon, or from Flathub, the terminal they would otherwise
+    # need does not exist.
+    applog.start_file_logging()
 
     # Before anything reads preferences: put a starter config.json on
     # disk if there is none, so the settings that matter are visible to
