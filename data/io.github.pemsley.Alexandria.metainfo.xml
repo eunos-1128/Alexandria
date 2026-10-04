@@ -11,7 +11,7 @@
 
   <description>
     <p>
-      Alexandria is a GTK4 library for managing scientific papers.
+      Alexandria is a library for managing scientific papers.
       Typically starting with a directory of PDFs, it extracts metadata (title,
       authors, year, DOI, journal) from the page text, CrossRef and
       OpenAlex, then presents a searchable, filterable card browser.
