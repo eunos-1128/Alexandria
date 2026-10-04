@@ -437,6 +437,18 @@ stops working the moment it is false.
   Flatpak makes it sharper: `flatpak run` from a terminal is not
   something a user will think to do, and `journalctl` is worse.
 
+- **DONE 2026-10-04 — covered off the application.** The Flathub page
+  carries the link, from `<url type="bugtracker">` in the metainfo
+  (`.../pemsley/Alexandria/issues`), which is where a Flatpak user
+  goes anyway. An in-app menu item would duplicate it.
+
+  The other half of the original entry — a report that arrives
+  carrying the version, the runtime and the last few log lines — is
+  now mostly served by **Help → Show Log** and its Copy button
+  (2026-10-04). What a copied log still does not say is the version
+  and whether it is a Flatpak; a line at the head of the log would
+  fix that. Original entry:
+
 - **Somewhere obvious to send a bug report.** There is no in-app
   route to the issue tracker, and no way for a report to carry the
   version, the runtime, the catalogue layout or the last few log
