@@ -803,6 +803,36 @@ def make_metadata_chip(record, parent_window=None, pdf_path=None,
     return btn
 
 
+def library_change_message(status, path=None):
+    """What the status bar says after the library changed underneath
+    it.
+
+    Reported 2026-10-03: a paper was deleted, the bar said "Library
+    updated (deleted)", and a download started seconds later. With no
+    name on it, the message read as the outcome of the download. The
+    file is the one thing that tells the two apart, and the watcher
+    knew it all along.
+
+    `status` is the importer's or the watcher's own word; `path` the
+    file it happened to. Statuses with no obvious phrasing fall back
+    to the old sentence, so an internal reload reason
+    ("crossref-backfill") still says something rather than claiming a
+    paper arrived."""
+    name = os.path.basename(path) if path else ""
+    phrasing = {
+        "deleted": "Removed from the library",
+        "new": "Added to the library",
+        "existing": "Updated in the library",
+        "duplicate": "Already in the library",
+        "merged": "Attached to its BibTeX entry",
+    }.get(status)
+    if phrasing and name:
+        return "{}: {}".format(phrasing, name)
+    if phrasing:
+        return phrasing
+    return "Library updated ({})".format(status or "")
+
+
 def _row_is_backed(row):
     """Is this row's paper still on disk?
 
@@ -4821,12 +4851,31 @@ class BrowserWindow(Adw.ApplicationWindow):
         the on-disk sidecar in make_card, so no DB write is needed."""
         self._on_watcher_change(status)
 
-    def _on_watcher_change(self, status):
+    def report_library_change(self, status, path=None):
+        """An in-app import changed the library: say so, and redraw.
+
+        The watcher cannot do this for us. Our own `import_pdf` has
+        already written the sidecar by the time its pass runs, so it
+        returns "recent" and the watcher deliberately stays quiet
+        (`watcher.py`, "the no-op self-event case"). Nothing then told
+        the main window, so a paper added from the Authors window
+        arrived in silence — and the status bar went on showing
+        whatever it last said, which on 2026-10-03 was a deletion that
+        had nothing to do with it."""
+        self._on_watcher_change(status, path)
+        return False
+
+    def _on_watcher_change(self, status, path=None):
         """Called on the GLib main thread after the watcher has applied
         a change to the index (import / delete / rename / reconcile /
         sidecar-resync). Debounced so a bulk refresh of N rows produces
-        one redraw rather than N."""
+        one redraw rather than N.
+
+        `path` is the file it happened to, where there is one — the
+        status bar names it, because "deleted" with no name reads as
+        the outcome of whatever the user was doing at the time."""
         self._pending_reload_status = status
+        self._pending_reload_path = path
         if getattr(self, "_reload_timer_id", None):
             try:
                 GLib.source_remove(self._reload_timer_id)
@@ -4883,8 +4932,9 @@ class BrowserWindow(Adw.ApplicationWindow):
         self._reload_timer_id = None
         self._last_reload_at = time.monotonic()
         self._reload(self.search.get_text() or None)
-        self.status.set_text("Library updated ({})".format(
-            getattr(self, "_pending_reload_status", "")))
+        self.status.set_text(library_change_message(
+            getattr(self, "_pending_reload_status", ""),
+            getattr(self, "_pending_reload_path", None)))
         # Live-refresh any open author dialogs so a paper imported
         # elsewhere (browser extension, another window) flips its
         # '✓ in library' badge without needing a reopen.

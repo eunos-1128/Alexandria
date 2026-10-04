@@ -53,7 +53,8 @@ def _is_sidecar(path):
 
 class LibraryWatcher:
     """Watches `library_root` for PDF changes and keeps the SQLite index
-    in sync. on_change(status_str) is called on the GLib main thread
+    in sync. on_change(status_str, path) is called on the GLib main
+    thread (the path is None for library-wide events)
     after each successful change."""
 
     def __init__(self, db_path, library_root, on_change_cb=None,
@@ -329,7 +330,7 @@ class LibraryWatcher:
             _log("ghost-merge: {} -> {} ({})".format(
                 path, status, new_path))
             if self.on_change:
-                GLib.idle_add(self.on_change, status)
+                GLib.idle_add(self.on_change, status, new_path or path)
             return
 
         if status == "duplicate" and rec:
@@ -341,7 +342,7 @@ class LibraryWatcher:
         if status in ("recent",):
             return
         if self.on_change:
-            GLib.idle_add(self.on_change, status)
+            GLib.idle_add(self.on_change, status, path)
 
     def _do_delete(self, path):
         conn = index.connect_existing(self.db_path)
@@ -353,7 +354,7 @@ class LibraryWatcher:
         finally:
             conn.close()
         if self.on_change:
-            GLib.idle_add(self.on_change, "deleted")
+            GLib.idle_add(self.on_change, "deleted", path)
 
     def _do_resync_sidecar(self, sc_path):
         """A `*.alexandria` sidecar appeared or changed in the library

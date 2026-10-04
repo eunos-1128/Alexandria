@@ -458,7 +458,7 @@ def _existing_dois(conn):
 
 class AuthorPage(Gtk.Box):
     def __init__(self, conn, authorship, on_institution=None,
-                 on_image_changed=None):
+                 on_image_changed=None, on_library_change=None):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         self.conn = conn
         self.authorship = authorship or {}
@@ -468,6 +468,13 @@ class AuthorPage(Gtk.Box):
         # AuthorsWindow learns the affiliation the page fetched and
         # can backfill its sidebar row and the author_trail table.
         self._on_institution = on_institution
+        # Called (on the main thread) with (status, path) when this
+        # page puts a paper into the library. The watcher cannot do
+        # it: our own import has already written the sidecar, so its
+        # pass returns "recent" and it stays quiet by design — which
+        # left the main window's status bar showing whatever it said
+        # before, often about something else entirely.
+        self._on_library_change = on_library_change
         # Called (on the main thread) with the new photo path (or
         # None) after every successful set/fetch/remove, so the
         # hosting window can refresh a sidebar row's avatar too.
@@ -2375,6 +2382,8 @@ class AuthorPage(Gtk.Box):
             return
         if doi:
             self._existing.add(doi.lower())
+        if self._on_library_change:
+            GLib.idle_add(self._on_library_change, status, target)
         GLib.idle_add(self._add_to_archive_done, btn, True, status, rec)
 
     def _set_add_btn_label(self, btn, text):
@@ -2406,9 +2415,12 @@ class AuthorsWindow(Adw.Window):
     survives restarts; works/impact data comes from the existing
     author_works_cache / author_scores tables."""
 
-    def __init__(self, conn, on_discover=None):
+    def __init__(self, conn, on_discover=None, on_library_change=None):
         super().__init__()
         self.conn = conn
+        # Passed to every page: how a paper added from here reaches
+        # the main window's status bar and card list.
+        self._on_library_change = on_library_change
         # Optional zero-arg callback that opens the Discover window —
         # supplied by BrowserWindow so the empty-trail state can
         # offer a way to find a first author.
@@ -2776,7 +2788,8 @@ class AuthorsWindow(Adw.Window):
                 on_institution=lambda inst, k=key:
                     self._on_page_institution(k, inst),
                 on_image_changed=lambda path, k=key:
-                    self._on_page_image(k, path))
+                    self._on_page_image(k, path),
+                on_library_change=self._on_library_change)
             scroll.set_child(page)
             self._pages[key] = page
             self.stack.add_named(scroll, key)
@@ -2973,7 +2986,9 @@ def _ensure_window(parent, conn):
         opener = getattr(parent, "_open_discover", None)
         if opener is not None:
             on_discover = lambda: opener(None)
-        win = AuthorsWindow(conn, on_discover=on_discover)
+        win = AuthorsWindow(
+            conn, on_discover=on_discover,
+            on_library_change=getattr(parent, "report_library_change", None))
 
         def _on_close(_w):
             global _authors_window
